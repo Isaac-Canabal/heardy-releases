@@ -51,12 +51,17 @@ class JustAudioMediaKit extends JustAudioPlatform {
   static final _logger = Logger('JustAudioMediaKit');
   final _players = HashMap<String, MediaKitPlayer>();
 
-  /// Patch de Heardy: el [Player] nativo de `media_kit` detrás de un
-  /// `AudioPlayer.id` de `just_audio`, para setearle propiedades de mpv
-  /// (`af`) que la API de `just_audio` no expone — `null` si ese id no
-  /// existe (todavía no se creó o ya se liberó). Uso esperado:
-  /// `(JustAudioPlatform.instance as JustAudioMediaKit).rawPlayerFor(id)`.
-  Player? rawPlayerFor(String id) => _players[id]?.rawPlayer;
+  /// Patch de Heardy: el [MediaKitPlayer] (y su [Player] nativo de mpv) más
+  /// reciente creado — `just_audio.AudioPlayer.id` es privado, así que no
+  /// hay forma de pedir "el de este id puntual" desde afuera del paquete.
+  /// Sirve porque Heardy sólo crea un único `AudioPlayer` para toda la app
+  /// (`AudioPlayerHandler._player`, ver audio_effects_service.dart); si eso
+  /// dejara de ser cierto, este patch necesitaría revisarse.
+  static MediaKitPlayer? lastCreatedPlayer;
+
+  /// Atajo sobre [lastCreatedPlayer] para setearle propiedades de mpv (`af`)
+  /// que la API de `just_audio` no expone.
+  static Player? get rawPlayer => lastCreatedPlayer?.rawPlayer;
 
   /// Players that are disposing (player id -> future that completes when the player is disposed)
   final _disposingPlayers = HashMap<String, Future<void>>();
@@ -101,6 +106,7 @@ class JustAudioMediaKit extends JustAudioPlatform {
     _logger.fine('instantiating new player ${request.id}');
     final player = MediaKitPlayer(request.id);
     _players[request.id] = player;
+    lastCreatedPlayer = player;
     await player.ready();
     _logger.fine('player ready! (players: $_players)');
     return player;
@@ -123,8 +129,10 @@ class JustAudioMediaKit extends JustAudioPlatform {
           code: 'error', message: 'Player ${request.id} doesn\'t exist.');
     }
 
-    final future = _players[request.id]!.release();
+    final player = _players[request.id]!;
+    final future = player.release();
     _players.remove(request.id);
+    if (identical(lastCreatedPlayer, player)) lastCreatedPlayer = null;
     _disposingPlayers[request.id] = future;
     await future;
     _disposingPlayers.remove(request.id);
