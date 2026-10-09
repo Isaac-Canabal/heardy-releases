@@ -12,7 +12,7 @@
 ; cambiarlo nunca: es lo que permite que una instalación futura se detecte
 ; como una actualización en vez de una instalación paralela.
 #define MyAppName "Heardy"
-#define MyAppVersion "1.1.7"
+#define MyAppVersion "1.1.8"
 #define MyAppExeName "heardy.exe"
 #define MyReleaseDir "..\..\build\windows\x64\runner\Release"
 
