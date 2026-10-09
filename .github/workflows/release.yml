@@ -1,6 +1,6 @@
 name: Release
 
-# Builds the Android APK, the Windows installer and (best effort) an unsigned iOS IPA, then publishes them as a GitHub
+# Builds the Android APK and the Windows installer, then publishes them as a GitHub
 # Release named after the tag, with the asset names the app's updater expects (Heardy.apk, Heardy-Setup.exe).
 #
 # Required repository secrets (Settings > Secrets and variables > Actions):
@@ -161,6 +161,8 @@ jobs:
         env:
           # firebase_cpp_sdk declares cmake_minimum_required < 3.5, which CMake 4 on the runner rejects.
           CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+          # The runner's newer MSVC turns <experimental/coroutine> into a hard error (permission_handler_windows).
+          CL: /D_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS
         run: |
           flutter build windows --release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -188,47 +190,11 @@ jobs:
           path: dist/Heardy-Setup.exe
           if-no-files-found: error
 
-  ios:
-    # Best effort and never blocks the release. Produces an UNSIGNED .ipa: it cannot be installed on a device as is.
-    # Real signing would need an Apple Developer account; the secrets to add later would be a distribution certificate
-    # (.p12) + its password, a provisioning profile, and the team id, plus an export step using `xcodebuild
-    # -exportArchive` instead of the zip below.
-    name: iOS (unsigned, best effort)
-    needs: check
-    runs-on: macos-latest
-    continue-on-error: true
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
-        with:
-          channel: stable
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          cache: true
-      - name: Dependencies and localizations
-        run: |
-          flutter pub get
-          flutter gen-l10n
-      - name: Build iOS without codesign
-        run: |
-          flutter build ios --release --no-codesign
-      - name: Package unsigned IPA
-        run: |
-          set -euo pipefail
-          mkdir -p dist/Payload
-          cp -R build/ios/iphoneos/Runner.app dist/Payload/Runner.app
-          (cd dist && zip -qry Heardy-unsigned.ipa Payload && rm -rf Payload)
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ios-unsigned
-          path: dist/Heardy-unsigned.ipa
-          if-no-files-found: error
-
   release:
     name: Publish release
-    needs: [check, android, windows, ios]
-    # ios is optional: run whenever the required jobs succeeded, whatever ios did. Dry runs never publish.
-    if: ${{ always() && needs.check.result == 'success' && needs.android.result == 'success' && needs.windows.result == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    needs: [check, android, windows]
+    # Dry runs never publish.
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -257,9 +223,7 @@ jobs:
           name: ${{ needs.check.outputs.tag }}
           draft: ${{ steps.draft.outputs.draft == 'true' }}
           generate_release_notes: true
-          # A missing Heardy-unsigned.ipa (iOS failed) only yields a warning.
           files: |
             dist/Heardy.apk
             dist/Heardy-Setup.exe
-            dist/Heardy-unsigned.ipa
-          fail_on_unmatched_files: false
+          fail_on_unmatched_files: true
