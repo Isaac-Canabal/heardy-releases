@@ -1,0 +1,79 @@
+plugins {
+    id "com.android.application"
+    id "dev.flutter.flutter-gradle-plugin"
+    // Debe ir después de com.android.application: lee google-services.json
+    // (config pública del proyecto de Firebase, no un secreto) para
+    // inicializar firebase_core/firebase_auth.
+    id "com.google.gms.google-services"
+}
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+} else {
+    keystorePropertiesFile = project.file('keystore.properties')
+    if (keystorePropertiesFile.exists()) {
+        keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+    }
+}
+
+android {
+    namespace "com.heardy.app"
+    compileSdk 36
+    ndkVersion "28.2.13676358"
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    defaultConfig {
+        applicationId "com.heardy.app"
+        minSdkVersion flutter.minSdkVersion
+        targetSdk 36
+        versionCode flutter.versionCode
+        versionName flutter.versionName
+        multiDexEnabled true
+    }
+
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties['keyAlias']
+            keyPassword keystoreProperties['keyPassword']
+            storeFile file('../../heardy-release-key.jks')
+            storePassword keystoreProperties['storePassword']
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            // A5 de la Fase 1 de seguridad (2026-08-24): sin esto, ni
+            // siquiera había ofuscación de nombres — `strings` sobre el APK
+            // encontraba texto legible por todos lados. Ver
+            // android/app/proguard-rules.pro para las reglas defensivas que
+            // acompañan esto, y verificar con un APK de release real en un
+            // dispositivo antes de considerar esto cerrado (no hay
+            // dispositivo Android disponible en este entorno).
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+flutter {
+    source "../.."
+}
+
+dependencies {
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.2.20"
+    // _nio: NewPipeExtractor (heardy_yt_stream) uses java.nio.file below API 33.
+    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs_nio:2.0.4"
+}

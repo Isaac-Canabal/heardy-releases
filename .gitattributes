@@ -1,0 +1,10 @@
+# `core.autocrlf` está en true en la máquina de desarrollo (Windows), lo que
+# es correcto para el código pero fatal para un script de shell que se ejecuta
+# dentro de un contenedor Linux: con CRLF, el kernel busca un intérprete
+# llamado "/bin/sh\r" y el contenedor muere con "no such file or directory",
+# un mensaje que no menciona en absoluto la causa real.
+#
+# server/docker-entrypoint.sh es el PID 1 de la imagen de producción: si se
+# corrompe así, no arranca nada.
+*.sh text eol=lf
+Dockerfile text eol=lf

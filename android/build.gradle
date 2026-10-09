@@ -1,0 +1,29 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        // NewPipeExtractor and its nanojson fork are only published on JitPack.
+        maven {
+            url 'https://jitpack.io'
+            content {
+                includeGroup 'com.github.teamnewpipe'
+                includeGroup 'com.github.TeamNewPipe'
+            }
+        }
+    }
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs << "-Xlint:-options"
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

@@ -1,0 +1,130 @@
+name: heardy
+description: An offline-first local music library player.
+publish_to: 'none'
+version: 1.1.7+7
+
+environment:
+  sdk: '>=3.12.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any
+  sqflite: ^2.3.0
+  path_provider: ^2.1.1
+  permission_handler: ^11.0.1
+  just_audio: ^0.9.36
+  # `just_audio` no declara soporte de Windows (Hallazgo 2 del plan de
+  # escritorio) — sin un paquete de federación, `AudioPlayer()` no tiene
+  # ningún backend nativo ahí y no reproduce nada. Se usa media_kit (libmpv)
+  # y no `just_audio_windows` (Media Foundation): las descargas de YouTube
+  # son MP4 fragmentado (moof/mdat) y Media Foundation las abre, reporta la
+  # duración y termina al instante sin sonar — verificado en vivo con la
+  # biblioteca real. mpv las reproduce sin remuxear nada.
+  # Fork propio vendorizado en packages/, no la versión de pub.dev: agrega
+  # acceso público al `Player` de media_kit (`JustAudioMediaKit.rawPlayer`),
+  # que la versión original no expone y que el ecualizador/normalización de
+  # escritorio necesitan para aplicar filtros de audio (`af`) vía
+  # `NativePlayer.setProperty` — ver audio_effects_service.dart. Vive en este
+  # repo (no en heardy-releases, que es sólo binarios públicos) porque no
+  # necesita ser público: sigue siendo código de la app, sólo que empaquetado
+  # aparte porque parchea un paquete de terceros.
+  just_audio_media_kit:
+    path: packages/just_audio_media_kit_patch
+  media_kit_libs_windows_audio: ^1.0.9
+  # Android only: resolves YouTube audio streams on the device (NewPipeExtractor
+  # + NewPipe's BotGuard poToken WebView), because googlevideo URLs resolved by
+  # the server are bound to the server's IP.
+  heardy_yt_stream:
+    path: packages/heardy_yt_stream
+  audio_service: ^0.18.12
+  audio_session: ^0.1.18
+  provider: ^6.1.1
+  http: ^1.1.0
+  uuid: ^4.2.1
+  path: ^1.8.3
+  flutter_local_notifications: ^17.1.2
+  shared_preferences: ^2.2.2
+  cupertino_icons: ^1.0.6
+  palette_generator: ^0.3.3
+  saf_util: ^3.1.0
+  saf_stream: ^4.0.1
+  # Selector de carpeta en escritorio — SAF no existe fuera de Android. Ver
+  # W1/W3 del plan de escritorio: `LibraryStorage.pickDirectory()` es lo
+  # único que lo usa.
+  file_picker: ^8.1.4
+  crypto: ^3.0.7
+  audio_metadata_reader: ^1.7.1
+  flutter_foreground_task: ^11.0.1
+  # Fase 2 del plan de seguridad: identidad por cuenta real (Firebase Auth)
+  # en vez de la clave única compartida por todo el APK. firebase_core
+  # inicializa el SDK; firebase_auth es registro/login/recuperación de
+  # contraseña. Sin flutter_secure_storage: el propio SDK ya persiste la
+  # sesión (su token de refresco) de forma segura y la renueva solo -- el
+  # plan original lo pedía por las dudas, pero guardar el token a mano
+  # habría sido una dependencia redundante, no una capa extra de verdad.
+  firebase_core: ^3.8.1
+  firebase_auth: ^5.3.4
+  # Compartir la imagen de estadísticas (Etapa 16, F6). Único paquete nuevo:
+  # RepaintBoundary + toImage ya cubren la captura (~20 líneas), share_plus
+  # sólo aporta el selector nativo de "compartir con...".
+  share_plus: ^11.0.0
+  # `sqflite` no tiene motor propio en escritorio: en Windows/Linux/macOS
+  # `databaseFactory` se reemplaza por este en tiempo de arranque (ver
+  # main.dart). Ya era dependencia de test (sqflite_common_ffi test), ahora
+  # además de producción — misma versión, un solo lugar que mantener.
+  sqflite_common_ffi: ^2.4.2
+  window_manager: ^0.5.2
+  # Cifrado del token de sesión de escritorio con DPAPI (ver secure_token_store.dart);
+  # ya eran transitivas, se declaran porque ahora se importan directamente.
+  ffi: ^2.1.3
+  win32: ^5.15.0
+  # Ícono en la bandeja del sistema (Windows): cerrar la ventana pasa a
+  # ocultarla en vez de terminar el proceso, y el ícono deja abrir/cerrar
+  # de verdad. Mismo autor/ecosistema que window_manager (leanflutter).
+  tray_manager: ^0.5.2
+  # Ya era dependencia transitiva de window_manager; se declara directa
+  # porque el modo "minimizar y superponer" la usa para ubicar la ventana
+  # chica contra el borde de la pantalla (window_manager no expone el
+  # tamaño del monitor por sí solo).
+  screen_retriever: ^0.2.2
+  # Apartado de notificaciones (Etapa 17): package_info_plus lee la versión
+  # instalada de verdad (pubspec.yaml es la única fuente), sin duplicarla a
+  # mano en un segundo sitio que se desincroniza. url_launcher abre el
+  # release de GitHub cuando hay una versión nueva — ya era dependencia
+  # transitiva (share_plus la trae), se declara directa porque ahora el
+  # código propio la usa.
+  package_info_plus: ^8.1.0
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+  # Usado por test/library_scan_service_test.dart: permite sustituir
+  # path_provider por un directorio temporal para correr MetadataService
+  # (temp copy + carátulas) desde escritorio, sin plugins ni dispositivo.
+  path_provider_platform_interface: ^2.1.2
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#0D1B3E"
+  adaptive_icon_foreground: "assets/icon/app_icon_padded.png"
+  # W4 del plan de escritorio: sin esto, `windows/runner/resources/app_icon.ico`
+  # se queda con el logo por defecto de Flutter que dejó `flutter create`.
+  windows:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    icon_size: 256
+
+flutter:
+  uses-material-design: true
+  generate: true
+  assets:
+    - assets/icon/

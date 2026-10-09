@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "462683095100",
+    "project_id": "heardy-001",
+    "storage_bucket": "heardy-001.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:462683095100:android:06e924dc5414b83643c339",
+        "android_client_info": {
+          "package_name": "com.heardy.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyApAedasVQ1kCR4itzYTndu8mu0XDS7IsI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

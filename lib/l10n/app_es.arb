@@ -1,0 +1,628 @@
+{
+  "@@locale": "es",
+  "appTitle": "Heardy",
+  "@appTitle": {"description": "Nombre de la app"},
+
+  "commonCancel": "Cancelar",
+  "commonDelete": "Eliminar",
+  "commonSave": "Guardar",
+  "commonRename": "Renombrar",
+  "commonCreate": "Crear",
+  "commonConfirm": "Confirmar",
+  "commonAccept": "Aceptar",
+  "commonName": "Nombre",
+  "commonCreateNewPlaylistHint": "Crear nueva playlist…",
+  "commonBack": "Volver",
+  "commonUnknownArtist": "Artista desconocido",
+
+  "homeTitle": "Mis playlists",
+  "homeSearchHint": "Buscar en mis playlists",
+  "homeEmptyTitle": "Sin playlists todavía",
+  "homeEmptyBody": "Crea una lista, agrega archivos a tu carpeta o descarga desde Añadir.",
+  "homeNewPlaylistTitle": "Nueva playlist",
+  "homeSongsCount": "{count, plural, =0{Sin canciones} one{1 canción, {duration}} other{{count} canciones, {duration}}}",
+  "@homeSongsCount": {
+    "placeholders": {
+      "count": {"type": "int"},
+      "duration": {"type": "String"}
+    }
+  },
+  "homeDeleteListTitle": "Eliminar lista",
+  "homeDeleteListBody": "¿Estás seguro de que deseas eliminar la lista \"{name}\"?\n\nEsto también eliminará permanentemente del dispositivo las canciones descargadas que no pertenezcan a ninguna otra lista.",
+  "@homeDeleteListBody": {
+    "placeholders": {"name": {"type": "String"}}
+  },
+  "homeDeletedSnack": "Se eliminó la lista \"{name}\"",
+  "@homeDeletedSnack": {
+    "placeholders": {"name": {"type": "String"}}
+  },
+
+  "settingsTitle": "Ajustes",
+  "settingsSectionStorage": "Almacenamiento",
+  "settingsSpaceUsed": "Espacio usado",
+  "settingsCalculating": "Calculando...",
+  "settingsCalcError": "Error calculando",
+  "settingsTotalDownloadedSongs": "Total de canciones descargadas",
+  "settingsFolderReadySnack": "Carpeta \"Heardy\" lista. Ve a Bandeja para escanearla.",
+  "settingsFolderPickError": "No se pudo elegir la carpeta: {error}",
+  "@settingsFolderPickError": {
+    "placeholders": {"error": {"type": "String"}}
+  },
+  "settingsSectionAppearance": "Apariencia",
+  "settingsThemeColor": "Tema de color",
+  "settingsSectionLanguage": "Idioma",
+  "settingsSectionPlaylistOrder": "Orden de playlists",
+  "settingsCreatePlaylistsHint": "Crea playlists para poder reordenarlas aquí.",
+  "settingsSectionLocalLibrary": "Biblioteca local (beta)",
+  "settingsImportFromFolder": "Importar desde carpeta",
+  "settingsImportFolderBody": "Elige una carpeta y Heardy creará \"Heardy/\" dentro, con una subcarpeta por playlist. Coloca archivos .mp3/.mp4 ahí desde el explorador — recargar y asignar lo suelto se hace desde la pestaña Bandeja.",
+  "settingsChooseFolder": "Elegir carpeta",
+  "settingsRepairArtwork": "Recuperar carátulas que faltan",
+  "settingsRepairArtworkBody": "Vuelve a bajar la carátula de las canciones descargadas que no la tienen, usando su enlace de origen.",
+  "settingsRepairArtworkWorking": "Recuperando carátulas… {done} de {total}",
+  "@settingsRepairArtworkWorking": {"placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}},
+  "settingsRepairArtworkDone": "{count, plural, =0{No había carátulas que recuperar} =1{Se recuperó 1 carátula} other{Se recuperaron {count} carátulas}}",
+  "@settingsRepairArtworkDone": {"placeholders": {"count": {"type": "int"}}},
+  "settingsSectionSearch": "Búsqueda",
+  "settingsMaxResults": "Resultados máximos",
+  "settingsMaxResultsBody": "Número de resultados a mostrar en búsquedas (10-100)",
+  "settingsSectionAudio": "Ajustes de audio",
+  "audioFxStabilizeTitle": "Estabilizar audio",
+  "audioFxStabilizeBody": "Mantiene todas las canciones a un volumen similar, para no tener que subir o bajar el volumen entre una y otra.",
+  "audioFxEqualizerTitle": "Ecualizador",
+  "audioFxEqualizerBody": "Ajusta el balance de graves, medios y agudos, o elige un preconfigurado.",
+  "audioFxPresetFlat": "Plano",
+  "audioFxPresetVocalBoost": "Mejora de voz",
+  "audioFxPresetTrebleFocus": "Enfoque de agudos",
+  "settingsSectionAbout": "Acerca de",
+  "legalTitle": "Términos y privacidad",
+  "legalTermsTab": "Términos de uso",
+  "legalPrivacyTab": "Privacidad",
+  "legalAcceptCheckbox": "He leído y acepto los Términos de uso y la Política de privacidad",
+  "legalAcceptButton": "Aceptar y continuar",
+  "legalVersionLine": "Versión {version} · Operador: Vainastech · vainastech@gmail.com",
+  "@legalVersionLine": {"placeholders": {"version": {"type": "String"}}},
+  "settingsAboutBody": "Reproductor de tu biblioteca musical, 100% offline.",
+  "settingsAboutVersion": "Versión {version}",
+  "@settingsAboutVersion": {"placeholders": {"version": {"type": "String"}}},
+  "settingsAboutExternalServices": "Escuchar música es siempre 100% offline. La app se conecta a internet sólo para tres cosas: buscar la letra de una canción, traducirla (si lo pides) y descargar música nueva — y nunca comparte tu nombre ni tu correo al hacerlo. Descargar música sí requiere iniciar sesión con una cuenta.",
+
+  "statsSectionTitle": "Estadísticas",
+  "statsYourActivity": "Tu actividad",
+  "statsWeek": "Semana",
+  "statsMonth": "Mes",
+  "statsEmptyHint": "Reproduce música para ver tus estadísticas.",
+  "statsPlaysLabel": "Reproducciones",
+  "statsListenTimeLabel": "Tiempo escuchado",
+  "statsTopArtists": "Top 5 artistas",
+  "statsTopSongs": "Top canciones",
+  "statsUnknownArtist": "Desconocido",
+  "statsUntitledSong": "Sin título",
+
+  "serverSectionTitle": "Servidor de descargas",
+  "serverIntroBody": "Heardy descarga a través del servidor oficial del proyecto. No hay nada que configurar aquí: si una descarga falla, prueba la conexión para saber si el problema es del servidor o de tu red.",
+  "serverTestingButton": "Probando…",
+  "serverTestButton": "Probar conexión",
+  "serverConnectedStatus": "Conectado — yt-dlp {version}",
+  "@serverConnectedStatus": {
+    "placeholders": {"version": {"type": "String"}}
+  },
+
+  "playlistUpdateFromYoutube": "Actualizar desde YouTube",
+  "playlistNoNewSongs": "Ya está actualizada, no hay canciones nuevas",
+  "playlistSongsQueuedSnack": "{count, plural, one{1 canción nueva encolada} other{{count} canciones nuevas encoladas}}",
+  "@playlistSongsQueuedSnack": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "playlistUpdateError": "No se pudo actualizar: {error}",
+  "@playlistUpdateError": {
+    "placeholders": {"error": {"type": "String"}}
+  },
+  "playlistSortImportOrder": "Orden de importación",
+  "playlistSortArtist": "Artista",
+  "playlistSortTitle": "Título",
+  "playlistSortDuration": "Duración",
+  "playlistSortTooltip": "Ordenar",
+  "playlistFinishEditing": "Terminar edición",
+  "playlistModifyOrder": "Modificar orden",
+  "playlistSearchHint": "Buscar en esta lista...",
+  "playlistEmptyTitle": "No hay canciones en esta lista",
+  "playlistEmptyBody": "Agrega archivos a tu carpeta o descarga desde la pestaña Añadir.",
+  "playlistNoResultsTitle": "Sin resultados",
+  "playlistNoResultsBody": "Ninguna canción coincide con \"{query}\".",
+  "@playlistNoResultsBody": {
+    "placeholders": {"query": {"type": "String"}}
+  },
+  "playlistPlayNextSnack": "Se reproducirá \"{title}\" después de la actual",
+  "@playlistPlayNextSnack": {
+    "placeholders": {"title": {"type": "String"}}
+  },
+  "playlistDeletedSnack": "Se eliminó \"{title}\" de la lista",
+  "@playlistDeletedSnack": {
+    "placeholders": {"title": {"type": "String"}}
+  },
+  "playlistUndo": "Deshacer",
+  "playlistMoveToOther": "Mover a otra playlist",
+  "playlistCopyToOther": "Copiar a otra playlist",
+  "playlistChangePosition": "Cambiar posición",
+  "playlistMovedSnack": "\"{title}\" movida",
+  "@playlistMovedSnack": {
+    "placeholders": {"title": {"type": "String"}}
+  },
+  "playlistCopiedSnack": "\"{title}\" copiada",
+  "@playlistCopiedSnack": {
+    "placeholders": {"title": {"type": "String"}}
+  },
+  "playlistNewPositionTitle": "Nueva posición",
+  "playlistPositionHint": "Entre 1 y {total}",
+  "@playlistPositionHint": {
+    "placeholders": {"total": {"type": "int"}}
+  },
+  "playlistPositionError": "Ingresa un número entre 1 y {total}",
+  "@playlistPositionError": {
+    "placeholders": {"total": {"type": "int"}}
+  },
+  "playlistGoneTitle": "Playlist no disponible",
+  "playlistGoneBody": "Esta playlist ya no existe.",
+
+  "nowPlayingNoMusic": "No hay música seleccionada",
+  "nowPlayingLyricsButton": "Letra",
+  "nowPlayingQueueButton": "Cola",
+  "nowPlayingRewind5": "Retroceder 5 s",
+  "nowPlayingForward5": "Adelantar 5 s",
+  "desktopVolume": "Volumen",
+  "desktopShowNowPlaying": "Mostrar reproduciendo ahora",
+  "desktopHideNowPlaying": "Ocultar panel",
+  "desktopTrayShow": "Mostrar Heardy",
+  "desktopTrayQuit": "Salir",
+  "desktopCloseDialogTitle": "¿Cerrar Heardy?",
+  "desktopCloseDialogBody": "Puedes minimizar a la bandeja del sistema y seguir escuchando música en segundo plano, o cerrar la aplicación por completo.",
+  "desktopCloseDialogMinimize": "Minimizar a la bandeja",
+  "desktopCloseDialogQuit": "Cerrar Heardy",
+  "desktopMiniModeEnter": "Minimizar y superponer",
+  "desktopMiniModeRestore": "Volver a la vista completa",
+  "desktopExpandLyrics": "Expandir letra",
+  "desktopCollapseLyrics": "Contraer letra",
+  "desktopEnterCinemaMode": "Modo cine",
+  "desktopExitCinemaMode": "Salir del modo cine",
+  "desktopNowPlayingFrom": "Reproduciendo desde {playlist}",
+  "@desktopNowPlayingFrom": {
+    "placeholders": {
+      "playlist": {"type": "String"}
+    }
+  },
+  "desktopNowPlaying": "Reproduciendo",
+  "nowPlayingShuffleTitle": "Aleatorio",
+  "nowPlayingRepeatTitle": "Repetir",
+  "nowPlayingOnLabel": "Activado",
+  "nowPlayingOffLabel": "Desactivado",
+  "nowPlayingRepeatOneLabel": "Una canción",
+  "nowPlayingRepeatAllLabel": "Todas",
+  "nowPlayingSleepTimerTitle": "Temporizador de pausa",
+  "nowPlayingSleepTimerRemaining": "Quedan {remaining}",
+  "@nowPlayingSleepTimerRemaining": {
+    "placeholders": {"remaining": {"type": "String"}}
+  },
+  "nowPlayingSleepTimerBody": "Pausa la reproducción automáticamente",
+  "nowPlayingCustomChip": "Personalizado",
+  "nowPlayingMinutesDialogTitle": "Minutos",
+  "nowPlayingMinutesHint": "Entre {min} y {max}",
+  "@nowPlayingMinutesHint": {
+    "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}
+  },
+  "nowPlayingMinutesError": "Ingresa un número entre {min} y {max}",
+  "@nowPlayingMinutesError": {
+    "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}
+  },
+  "lyricsUnavailable": "Letra no disponible",
+  "queueTitle": "Cola de reproducción",
+  "queueEmpty": "Cola vacía",
+
+  "searchTitle": "Buscar",
+  "searchLocalTab": "Mi biblioteca",
+  "searchInternetTab": "Internet",
+  "searchKindSongs": "Canciones",
+  "searchKindPlaylists": "Listas",
+  "searchKindAlbums": "Álbumes",
+  "searchKindArtists": "Artistas",
+  "searchLocalHint": "Buscar en tu biblioteca",
+  "searchYoutubeHint": "Buscar en internet",
+  "searchLocalEmptyTitle": "Busca tu música",
+  "searchLocalEmptySubtitle": "Escribe el título o el artista",
+  "searchNoResultsSubtitle": "No encontramos nada con \"{query}\"",
+  "@searchNoResultsSubtitle": {
+    "placeholders": {"query": {"type": "String"}}
+  },
+  "searchNoServerTitle": "No hay servidor de descargas configurado",
+  "searchNoServerSubtitle": "Configúralo en Ajustes → Servidor de descargas",
+  "searchYoutubeEmptyTitle": "Busca en internet",
+  "searchYoutubeEmptySubtitle": "Escribe para buscar sin salir de la app",
+  "searchFailedTitle": "No se pudo buscar",
+  "searchFailedGeneric": "No se pudo buscar: {error}",
+  "@searchFailedGeneric": {
+    "placeholders": {"error": {"type": "String"}}
+  },
+  "searchListenTooltip": "Escuchar",
+  "searchListenFailed": "No se pudo reproducir: {error}",
+  "@searchListenFailed": {
+    "placeholders": {"error": {"type": "String"}}
+  },
+  "searchListenDownloadAction": "Descargar",
+  "searchStreamPlaybackFailed": "Se cortó la reproducción en streaming",
+  "searchAddedToQueueSnack":"\"{title}\" agregada a la cola",
+  "@searchAddedToQueueSnack": {
+    "placeholders": {"title": {"type": "String"}}
+  },
+  "searchAlreadyQueuedSnack": "Esa canción ya estaba en la cola",
+
+  "navInbox": "Bandeja",
+  "navAdd": "Añadir",
+
+  "inboxScanSummaryBase": "Nuevas: {inserted} · Movidas: {moved} · Actualizadas: {updated} · Sin cambios: {unchanged}",
+  "@inboxScanSummaryBase": {
+    "placeholders": {
+      "inserted": {"type": "int"}, "moved": {"type": "int"},
+      "updated": {"type": "int"}, "unchanged": {"type": "int"}
+    }
+  },
+  "inboxScanMissingSuffix": " · Faltantes: {missing}",
+  "@inboxScanMissingSuffix": {
+    "placeholders": {"missing": {"type": "int"}}
+  },
+  "inboxRootUnavailable": "La carpeta de tu biblioteca ya no está disponible. Elige una de nuevo.",
+  "inboxScanError": "Error al escanear: {error}",
+  "@inboxScanError": {
+    "placeholders": {"error": {"type": "String"}}
+  },
+  "inboxIgnoredCountSnack": "{count, plural, one{1 canción ignorada} other{{count} canciones ignoradas}}",
+  "@inboxIgnoredCountSnack": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxRestoredCountSnack": "{count, plural, one{1 canción restaurada a la bandeja} other{{count} canciones restauradas a la bandeja}}",
+  "@inboxRestoredCountSnack": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxAssignedCountSnack": "{count, plural, one{1 canción asignada} other{{count} canciones asignadas}}",
+  "@inboxAssignedCountSnack": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxTitle": "Bandeja de entrada",
+  "inboxSubtitleIgnored": "Ignoradas — se pueden restaurar",
+  "inboxSubtitleLoose": "Archivos sueltos sin playlist",
+  "inboxTabActive": "Bandeja ({count})",
+  "@inboxTabActive": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxTabIgnored": "Ignoradas ({count})",
+  "@inboxTabIgnored": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxSelectNone": "Ninguna",
+  "inboxSelectAll": "Seleccionar todo",
+  "inboxCountIgnoredSuffix": "{count} ignoradas",
+  "@inboxCountIgnoredSuffix": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxCountUnassignedSuffix": "{count} sin asignar",
+  "@inboxCountUnassignedSuffix": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxRestoreButton": "Restaurar a la bandeja ({count})",
+  "@inboxRestoreButton": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxIgnoreButton": "Ignorar ({count})",
+  "@inboxIgnoreButton": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxAssignButton": "Asignar a… ({count})",
+  "@inboxAssignButton": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "inboxNoFolderTitle": "Todavía no elegiste una carpeta",
+  "inboxNoFolderBody": "Elige dónde vive tu música para poder escanearla.",
+  "inboxEmptyTitle": "Todo organizado",
+  "inboxEmptyBody": "Agrega archivos a la carpeta desde fuera de la app y toca recargar aquí arriba.",
+  "inboxNoIgnoredTitle": "No ignoraste ninguna canción",
+  "inboxNoIgnoredBody": "Las que descartes desde la bandeja aparecen aquí, y puedes traerlas de vuelta cuando quieras.",
+  "inboxAssignSheetTitle": "Asignar a…",
+
+  "importScreenTitle": "Añadir música",
+  "importUrlHint": "Pega un enlace de YouTube o Spotify…",
+  "importPasteTooltip": "Pegar",
+  "importAnalyzeError": "No se pudo analizar el enlace: {message}",
+  "@importAnalyzeError": {
+    "placeholders": {"message": {"type": "String"}}
+  },
+  "importSavedForLaterSnack": "Guardado. Se descargará solo cuando el servidor esté disponible",
+  "importAlreadyInWaitlistSnack": "Ya estaba en la lista de espera",
+  "importSongsQueuedSnack": "{count, plural, one{1 canción encolada} other{{count} canciones encoladas}}",
+  "@importSongsQueuedSnack": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "importSpotifySkippedSuffix": " · {skipped} sin buena coincidencia en YouTube",
+  "@importSpotifySkippedSuffix": {
+    "placeholders": {"skipped": {"type": "int"}}
+  },
+  "importBatchCappedSuffix": " · solo se añadieron las primeras {max}",
+  "@importBatchCappedSuffix": {
+    "placeholders": {"max": {"type": "int"}}
+  },
+  "importNoServerBody": "Configúralo en Ajustes → Servidor de descargas.",
+  "importNoFolderTitle": "Elige primero una carpeta de biblioteca",
+  "importNoFolderBody": "Las descargas se guardan ahí, igual que los archivos que importas a mano. Configúralo en Ajustes.",
+  "importSaveForLaterButton": "Guardar para cuando el servidor esté disponible",
+  "importWaitlistTitle": "Lista de espera · servidor no disponible",
+  "importRetryNowButton": "Reintentar ahora",
+  "importDeletedPlaylistFallback": "Playlist eliminada",
+  "importDownloadButton": "Descargar",
+  "importVideosCount": "{count, plural, one{{count} video} other{{count} videos}}",
+  "@importVideosCount": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "importDownloadCountButton": "{count, plural, one{Descargar 1 canción} other{Descargar {count} canciones}}",
+  "@importDownloadCountButton": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "importSpotifyGoodMatchSummary": "{acceptable} de {total} con buena coincidencia",
+  "@importSpotifyGoodMatchSummary": {
+    "placeholders": {"acceptable": {"type": "int"}, "total": {"type": "int"}}
+  },
+  "importSpotifyPartialMatchSummary": "{acceptable} de {total} se van a descargar — el resto no tiene una coincidencia confiable en YouTube",
+  "@importSpotifyPartialMatchSummary": {
+    "placeholders": {"acceptable": {"type": "int"}, "total": {"type": "int"}}
+  },
+  "importSpotifyNoMatchesButton": "Sin coincidencias descargables",
+  "importQueueSectionTitle": "En cola",
+  "importCancelAllButton": "Cancelar todo",
+  "importFailuresTitle": "No se pudieron descargar",
+  "importDismissButton": "Descartar",
+  "importMatchNoResult": "No se encontró nada parecido en YouTube",
+  "importMatchGood": "Δ {diff}s",
+  "@importMatchGood": {
+    "placeholders": {"diff": {"type": "int"}}
+  },
+  "importMatchReview": "revisar · Δ {diff}s",
+  "@importMatchReview": {
+    "placeholders": {"diff": {"type": "int"}}
+  },
+  "importMatchNone": "no se descargará",
+
+  "downloadPhaseResolving": "Obteniendo datos…",
+  "downloadPhasePreparing": "Preparando en el servidor…",
+  "downloadPhaseDownloading": "Descargando…",
+  "downloadPhaseSaving": "Guardando en la biblioteca…",
+  "downloadCardTitle": "Descargando",
+  "downloadCardCancelThisTooltip": "Cancelar esta canción",
+  "downloadCardPreparing": "Preparando…",
+  "downloadCardQueuedSuffix": "+{count} en cola",
+  "@downloadCardQueuedSuffix": {
+    "placeholders": {"count": {"type": "int"}}
+  },
+  "downloadCardCancelAllButton": "Cancelar toda la tanda",
+  "playlistTargetSheetTitle": "¿A qué playlist?",
+  "searchResultsAlbumLabel": "Búsqueda",
+  "themeNavy": "Azul nocturno",
+  "themeViolet": "Violeta neón",
+  "themeRose": "Rosa eléctrico",
+  "themeGreen": "Verde bosque",
+  "themeOrange": "Naranja ardiente",
+  "themeRed": "Rojo intenso",
+  "themeCustom": "Personalizado",
+  "themeCustomizeTitle": "Personalizar colores",
+  "themePrimaryColorLabel": "Color principal",
+  "themeSecondaryColorLabel": "Color secundario",
+  "themeCombinedToggle": "Degradado combinado",
+  "themeCombinedOnHint": "Los dos colores se funden en un degradado",
+  "themeCombinedOffHint": "Cada color se usa por separado, sin mezclarse",
+
+  "authScreenTitle": "Tu cuenta",
+  "authEmailLabel": "Correo electrónico",
+  "authPasswordLabel": "Contraseña",
+  "authSignInButton": "Iniciar sesión",
+  "authRegisterButton": "Crear cuenta",
+  "authToggleToRegisterPrompt": "¿No tienes cuenta? Crea una",
+  "authToggleToSignInPrompt": "¿Ya tienes cuenta? Inicia sesión",
+  "authForgotPasswordLink": "¿Olvidaste tu contraseña?",
+  "authForgotPasswordSentSnack": "Te mandamos un correo para restablecerla",
+  "authVerifyEmailTitle": "Verificá tu correo",
+  "authVerifyEmailBody": "Te mandamos un enlace a {email}. Ábrelo y vuelve aquí.",
+  "@authVerifyEmailBody": {"placeholders": {"email": {"type": "String"}}},
+  "authResendEmailButton": "Reenviar correo",
+  "authResendEmailSentSnack": "Correo reenviado",
+  "authIveVerifiedButton": "Ya lo verifiqué",
+  "authStillNotVerifiedSnack": "Todavía no vemos tu correo verificado",
+  "authWrongAccountHint": "¿Cuenta equivocada? Cierra sesión",
+  "authSignOutButton": "Cerrar sesión",
+  "authErrorGeneric": "No se pudo completar la operación. Intentá de nuevo.",
+  "authErrorInvalidEmail": "Ese correo no parece válido.",
+  "authErrorWeakPassword": "La contraseña necesita al menos 6 caracteres.",
+  "authErrorEmailInUse": "Ya existe una cuenta con ese correo.",
+  "authErrorWrongCredentials": "Correo o contraseña incorrectos.",
+  "authErrorUserDisabled": "Esta cuenta fue deshabilitada.",
+  "authErrorTooManyRequests": "Demasiados intentos. Prueba de nuevo en un rato.",
+  "authErrorAppNotAuthorized": "Esta compilación de la app no está autorizada a iniciar sesión. Su firma no está registrada en la consola de Firebase.",
+  "authRequiredTitle": "Inicia sesión para descargar",
+  "authRequiredBody": "Crear una cuenta es gratis y toma un minuto. La necesitas para bajar canciones desde el servidor de Heardy — tu biblioteca local no la necesita para nada.",
+  "authRequiredButton": "Iniciar sesión",
+  "settingsAccountSectionTitle": "Cuenta",
+  "settingsAccountSignedInAs": "Sesión iniciada como {email}",
+  "@settingsAccountSignedInAs": {"placeholders": {"email": {"type": "String"}}},
+  "settingsAccountNotSignedIn": "Sin sesión iniciada — hace falta sólo para descargar",
+  "settingsAccountManageButton": "Gestionar cuenta",
+  "importDailyQuotaRemaining": "Te quedan {remaining} de {dailyLimit} canciones hoy",
+  "@importDailyQuotaRemaining": {"placeholders": {"remaining": {"type": "int"}, "dailyLimit": {"type": "int"}}},
+  "importMonthlyQuotaRemaining": "Te quedan {remaining} de {monthlyLimit} canciones este mes",
+  "@importMonthlyQuotaRemaining": {"placeholders": {"remaining": {"type": "int"}, "monthlyLimit": {"type": "int"}}},
+
+  "accountPromptTitle": "¿Vincular tu biblioteca a una cuenta?",
+  "accountPromptBody": "Tus canciones se quedan en el teléfono, siempre. Una cuenta guarda un índice (títulos y artistas, nunca audio), tus estadísticas y tu lista de amigos, para verlos desde otro dispositivo o compartirlos.",
+  "accountPromptNotNow": "Ahora no",
+  "accountPromptCreateAccount": "Crear cuenta",
+
+  "syncSectionTitle": "Sincronización",
+  "syncNowButton": "Sincronizar ahora",
+  "syncLastSync": "Última sincronización: {when}",
+  "@syncLastSync": {"placeholders": {"when": {"type": "String"}}},
+  "syncNeverSynced": "Todavía no se sincronizó",
+  "syncInProgress": "Sincronizando…",
+  "syncErrorLabel": "Error: {message}",
+  "@syncErrorLabel": {"placeholders": {"message": {"type": "String"}}},
+  "syncDeleteMyData": "Borrar mis datos de la cuenta",
+  "syncDeleteMyDataConfirmTitle": "¿Borrar tus datos de la cuenta?",
+  "syncDeleteMyDataConfirmBody": "Se borran tu biblioteca sincronizada, tu historial y tus amistades del servidor. Tus canciones en este teléfono no se tocan. Puedes volver a sincronizar más adelante.",
+  "syncDeleteMyDataDone": "Tus datos de la cuenta fueron borrados",
+  "syncSuccessMessage": "Sincronización completada",
+
+  "usernameClaimTitle": "Elige tu nombre de usuario",
+  "usernameClaimHint": "solo-letras-y-numeros",
+  "usernameClaimAvailable": "Disponible",
+  "usernameClaimChecking": "Comprobando…",
+  "usernameClaimSave": "Guardar",
+  "accountNoUsernameYet": "Todavía no elegiste un nombre de usuario",
+  "accountChooseUsernameButton": "Elegir",
+
+  "friendsTitle": "Amigos",
+  "friendsTabFriends": "Amigos",
+  "friendsTabRequests": "Solicitudes ({count})",
+  "@friendsTabRequests": {"placeholders": {"count": {"type": "int"}}},
+  "friendsSearchHint": "Nombre de usuario exacto",
+  "friendsSearchButton": "Buscar",
+  "friendsSendRequest": "Enviar solicitud",
+  "friendsAccept": "Aceptar",
+  "friendsReject": "Rechazar",
+  "friendsCancel": "Cancelar",
+  "friendsRemove": "Eliminar amigo",
+  "friendsNoActivity": "Sin actividad reciente",
+  "presenceShareNotSaved": "No se pudo guardar en el servidor; se reintentará en la próxima sincronización.",
+  "friendsEmpty": "Todavía no tienes amigos agregados",
+  "friendsNoPushNotice": "No se avisa cuando alguien acepta — revisa esta pantalla de vez en cuando",
+  "friendsNeedsUsername": "Elige un nombre de usuario para usar Amigos",
+
+  "notificationsTitle": "Notificaciones",
+  "notificationsEmpty": "No tienes notificaciones",
+  "notificationsFriendRequestSubtitle": "Quiere agregarte como amigo",
+  "notificationsUpdateTitle": "Nueva versión disponible: {name}",
+  "@notificationsUpdateTitle": {"placeholders": {"name": {"type": "String"}}},
+  "notificationsViewRelease": "Ver en GitHub",
+  "notificationsDownloadFromWebsite": "Desde la web",
+  "notificationsDismiss": "Descartar",
+
+  "shareStatsButton": "Compartir",
+  "shareStatsSheetTitle": "Así se va a compartir",
+  "shareStatsAction": "Compartir imagen",
+
+  "serverCapacityBanner": "El servidor llegó a su capacidad máxima. Esperá a que se renueve: volverá a funcionar en {remaining}.",
+  "@serverCapacityBanner": {"placeholders": {"remaining": {"type": "String"}}},
+
+  "presenceShareTitle": "Mostrar a tus amigos lo que estás escuchando",
+  "presenceShareBody": "Cuando esté activo, tus amigos ven en tiempo real qué canción estás reproduciendo. Se apaga solo cuando dejas de escuchar.",
+
+  "errorCodeLine": "Código: {code}",
+  "@errorCodeLine": {"placeholders": {"code": {"type": "String"}}},
+  "errorCheckInput": "Revisa lo que escribiste e inténtalo de nuevo.",
+  "errorGenericNetwork": "No se pudo conectar. Revisa tu conexión a internet e inténtalo de nuevo.",
+  "errorGenericFormat": "Recibimos datos que no pudimos leer. Inténtalo de nuevo; si sigue pasando, actualiza la app.",
+  "errorGenericFile": "No se pudo acceder a un archivo o carpeta. Comprueba que la carpeta de tu biblioteca siga disponible.",
+  "errorGenericUnknown": "Algo salió mal. Inténtalo de nuevo; si el problema continúa, indica este código al reportarlo.",
+  "authErrorNetwork": "No hay conexión con el servidor de cuentas. Revisa tu conexión a internet e inténtalo de nuevo.",
+  "authErrorOperationNotAllowed": "Esta forma de iniciar sesión no está disponible ahora mismo. Inténtalo más tarde.",
+  "authErrorRequiresRecentLogin": "Por seguridad, vuelve a iniciar sesión antes de hacer este cambio.",
+  "authErrorSessionExpired": "Tu sesión ha caducado. Inicia sesión de nuevo.",
+  "shareImageFailed": "No se pudo generar la imagen. Inténtalo de nuevo.",
+  "shareStatsError": "No se pudo compartir. {error}",
+  "@shareStatsError": {"placeholders": {"error": {"type": "String"}}},
+  "syncCompareError": "No se pudo comparar la biblioteca. {error}",
+  "@syncCompareError": {"placeholders": {"error": {"type": "String"}}},
+  "syncHistoryRestoreError": "No se pudo recuperar el historial. {error}",
+  "@syncHistoryRestoreError": {"placeholders": {"error": {"type": "String"}}},
+  "errorServiceUnavailable": "El servicio no está disponible ahora mismo. Inténtalo en unos minutos.",
+  "errorServerProblem": "El servidor tuvo un problema. Inténtalo de nuevo en unos minutos.",
+  "errorBusy": "El servidor está ocupado, reintentando en unos segundos.",
+  "errorBusyMinutes": "{minutes, plural, one{El servidor está ocupado. Se reintentará en 1 minuto.} other{El servidor está ocupado. Se reintentará en {minutes} minutos.}}",
+  "@errorBusyMinutes": {"placeholders": {"minutes": {"type": "int"}}},
+  "errorSessionExpired": "Tu sesión ha caducado o no es válida. Inicia sesión de nuevo e inténtalo otra vez.",
+  "errorConnect": "No se pudo conectar con el servidor. Comprueba tu conexión a internet e inténtalo de nuevo.",
+  "errorUnexpectedResponse": "El servidor respondió algo inesperado. Inténtalo de nuevo en unos minutos.",
+  "dlNotConfiguredFolder": "Elige primero una carpeta para tu biblioteca en Ajustes.",
+  "dlNotConfiguredServer": "Configura la dirección del servidor de descargas en Ajustes.",
+  "dlNetwork": "No se pudo conectar con el servidor. Comprueba tu conexión a internet; si llevaba un rato inactivo, puede tardar un minuto en arrancar. Se reintentará solo.",
+  "dlBadRequest": "Revisa lo que escribiste o el enlace e inténtalo de nuevo.",
+  "dlExtraction": "No se pudo obtener el audio en este momento. Se reintentará solo; si sigue fallando, inténtalo más tarde.",
+  "dlNotFound": "Ese contenido no se puede descargar (borrado, privado, restringido, en directo o demasiado largo).",
+  "dlUnsupportedMedia": "Ese vídeo no tiene una pista de audio compatible.",
+  "dlDailyQuota": "Has llegado a tu cupo de descargas. Vuelve más tarde.",
+  "dlAntiBot": "YouTube bloqueó temporalmente al servidor. Puede tardar entre 20 y 40 minutos; se reintentará solo.",
+  "dlCapacity": "Los servidores han agotado su capacidad de este mes. Vuelve a intentarlo más adelante.",
+  "dlSongTooLong": "Esta canción es demasiado larga para descargarla desde el servidor.",
+  "dlCancelled": "Descarga cancelada",
+  "cloudNotFound": "No encontramos lo que buscas. Comprueba el nombre e inténtalo de nuevo.",
+  "cloudConflictVersion": "Tu biblioteca cambió en otro dispositivo mientras se sincronizaba. Se volverá a intentar en la próxima sincronización.",
+  "cloudConflict": "Ese cambio choca con otro que ya existe. Revisa los datos e inténtalo de nuevo.",
+  "cloudQuota": "Has alcanzado el límite de uso de hoy para esta función. Inténtalo más tarde.",
+  "cloudNeedsUsername": "Elige un nombre de usuario para poder usar esta función.",
+  "cloudCapacity": "Los servidores han agotado su capacidad de este mes. Vuelve a intentarlo más adelante.",
+  "cloudUsernameTaken": "Ese nombre ya está en uso.",
+  "cloudUsernameReserved": "Ese nombre está reservado.",
+  "cloudAlreadyFriends": "Ya son amigos.",
+  "cloudFriendLimit": "Llegaste al máximo de amigos.",
+  "cloudPendingLimit": "Hay demasiadas solicitudes pendientes.",
+  "cloudSelfFriend": "No puedes agregarte a ti mismo.",
+  "syncStepAccount": "No se pudo conectar con tu cuenta.",
+  "syncStepHistoryUp": "No se pudo subir tu historial de reproducciones.",
+  "syncStepHistoryDown": "No se pudo descargar tu historial de reproducciones.",
+  "syncStepLibrary": "No se pudo sincronizar tu biblioteca.",
+  "syncStepPresence": "No se pudo actualizar «Escuchando ahora».",
+  "syncStepGeneric": "No se pudo sincronizar.",
+  "syncTryLater": "Inténtalo de nuevo más tarde.",
+  "syncCheckConnection": "Revisa tu conexión a internet e inténtalo de nuevo.",
+  "errorRateLimited": "Estás haciendo demasiadas acciones seguidas. Espera un momento e inténtalo de nuevo.",
+  "errorAuthUnavailable": "No se pudo comprobar tu sesión ahora mismo. Se reintentará en unos segundos.",
+  "errorServerNotReady": "El servidor todavía no está listo. Inténtalo de nuevo más tarde.",
+  "spotifyUrlInvalid": "Ese enlace de Spotify no es válido. Comprueba que lo copiaste completo.",
+  "spotifyDataMissing": "No se pudieron obtener los datos de Spotify. El enlace puede ser privado o no válido.",
+  "spotifyTypeUnsupported": "Ese tipo de enlace de Spotify no se puede descargar todavía.",
+  "spotifyAccess": "No se pudo acceder a Spotify. Comprueba que el enlace sea correcto y público.",
+  "spotifyFormat": "No se encontraron datos en la página de Spotify. Es posible que Spotify haya cambiado su formato.",
+  "playlistDuplicateName": "Ya existe una playlist con ese nombre.",
+  "probeNoServer": "No hay dirección de servidor configurada.",
+  "probeKeyInvalid": "La clave de acceso no es válida. Inicia sesión de nuevo.",
+  "probePotDown": "Conectado, pero el proveedor de PO tokens no responde: la mayoría de descargas fallarán.",
+  "probeTimeout": "El servidor no respondió a tiempo.",
+  "probeUnreachable": "No se pudo contactar con el servidor.",
+
+  "exploreTitle": "Explorar",
+  "exploreSearchHint": "Buscar canciones, artistas…",
+  "exploreRecentTitle": "Escuchar de nuevo",
+  "exploreRecentEmpty": "Escucha algo para ver recomendaciones",
+  "exploreRadioTitle": "Basado en lo que escuchas",
+  "exploreChartsTitle": "Tendencias",
+  "exploreNewReleasesTitle": "Nuevos lanzamientos",
+  "exploreArtistsTitle": "Tus artistas",
+  "exploreShelfError": "No se pudo cargar esta sección",
+  "exploreShelfRetry": "Reintentar",
+  "exploreOnlineHintTitle": "Descubre más música",
+  "exploreNeedsServerBody": "Configura el servidor de descargas en Ajustes para ver tendencias, lanzamientos y recomendaciones.",
+  "exploreNeedsLoginBody": "Inicia sesión para ver tendencias, lanzamientos y recomendaciones. Tu biblioteca local no la necesita.",
+  "exploreCollectionTracks": "{count, plural, =0{Sin canciones} one{1 canción} other{{count} canciones}}",
+  "exploreCollectionEmpty": "Esta lista no tiene canciones disponibles",
+  "exploreMoodEmpty": "No hay listas disponibles para esta categoría",
+  "explorePlayAll": "Reproducir",
+  "exploreStreamTrackSkipped": "No se pudo reproducir una canción y se saltó",
+  "exploreDownloadAll": "Descargar todo",
+  "exploreDownloadAllNothing": "Todas las canciones ya están en tu biblioteca",
+  "exploreDownloadAllSummary": "En cola: {added} · omitidas (ya descargadas o en cola): {skipped}",
+  "@exploreDownloadAllSummary": {"placeholders": {"added": {"type": "int"}, "skipped": {"type": "int"}}},
+  "exploreAlreadyDownloaded": "Ya está en tu biblioteca",
+  "exploreArtistSongs": "Canciones populares",
+  "exploreArtistAlbums": "Álbumes",
+  "exploreArtistSingles": "Sencillos",
+  "exploreArtistVideos": "Videos",
+  "exploreArtistRelated": "Artistas similares",
+  "exploreArtistSubscribers": "{count} suscriptores",
+  "@exploreArtistSubscribers": {"placeholders": {"count": {"type": "String"}}},
+  "exploreArtistAbout": "Acerca de",
+  "exploreArtistReadMore": "Ver más",
+  "exploreArtistReadLess": "Ver menos",
+  "exploreArtistEmpty": "Este artista no tiene contenido disponible"
+}

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9+ bloquea el tráfico HTTP en claro por defecto. El servidor de
+  descargas de Heardy (server/ en este repo) es un servicio casero al que se
+  llega por LAN o por Tailscale, típicamente sin TLS porque no tiene un
+  dominio público con certificado.
+
+  Sin este archivo la app falla con un error de red opaco que no menciona
+  cleartext por ningún lado, y es de las cosas más difíciles de diagnosticar
+  después. Ver CLAUDE.md, fase 3 de la rama de descargas.
+
+  El permiso se da SOLO a rangos privados y a la red de Tailscale, nunca a
+  internet abierto: cleartextTrafficPermitted sigue siendo false por defecto
+  para todo lo demás (base-config), así que LRCLIB y cualquier otro servicio
+  público siguen obligados a HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Loopback (emulador con adb reverse, o pruebas locales). -->
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- Host del emulador de Android. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+
+        <!-- Rangos privados IPv4 (RFC 1918): la LAN de casa. Android acepta
+             notación CIDR en <domain> para direcciones IP literales. -->
+        <domain includeSubdomains="true">192.168.0.0/16</domain>
+        <domain includeSubdomains="true">10.0.0.0/8</domain>
+        <domain includeSubdomains="true">172.16.0.0/12</domain>
+
+        <!-- Tailscale: CGNAT 100.64.0.0/10 y los nombres de MagicDNS. -->
+        <domain includeSubdomains="true">100.64.0.0/10</domain>
+        <domain includeSubdomains="true">ts.net</domain>
+    </domain-config>
+</network-security-config>

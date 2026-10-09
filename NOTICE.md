@@ -1,0 +1,35 @@
+# Third-party notices
+
+Heardy is distributed under the GNU General Public License v3.0 (see `LICENSE`). It includes or links the following
+third-party components. This list is not exhaustive for transitive dependencies.
+
+## GPL-3.0 components (Android)
+
+- **NewPipeExtractor** (https://github.com/TeamNewPipe/NewPipeExtractor), Copyright (C) the NewPipe contributors /
+  TeamNewPipe, licensed under GPL-3.0-or-later. Linked by the `heardy_yt_stream` plugin (`packages/heardy_yt_stream`) to
+  resolve audio stream URLs on the device. The corresponding source of this Heardy version is this repository.
+- **NewPipe** (https://github.com/TeamNewPipe/NewPipe), GPL-3.0-or-later. The proof-of-origin (poToken) generator in
+  `packages/heardy_yt_stream/android/src/main/kotlin/com/heardy/ytstream/potoken/` and the page
+  `packages/heardy_yt_stream/android/src/main/assets/po_token.html` are ported from NewPipe's BotGuard/WebView poToken
+  code, Copyright (C) the NewPipe contributors.
+
+## Other Android libraries (via `packages/heardy_yt_stream`)
+
+- **nanojson** (TeamNewPipe fork of grack/nanojson), Apache-2.0.
+- **OkHttp** (Square), Apache-2.0.
+- **RxJava / RxAndroid** (ReactiveX), Apache-2.0.
+- **AndroidX WebKit / Annotation**, Apache-2.0.
+
+## Dart / Flutter dependencies
+
+All other Dart and Flutter packages are used under their own licenses (BSD-3-Clause, MIT, Apache-2.0, ...). The exact
+set and versions are pinned in `pubspec.lock`; each package carries its license in its pub.dev page and source.
+`packages/just_audio_media_kit_patch` is a patched copy of `just_audio_media_kit` and keeps its own `LICENSE`. On
+Windows, audio playback uses `media_kit` with libmpv (see `media_kit_libs_windows_audio` for its licensing).
+
+Lyrics are fetched from LRCLIB (https://lrclib.net/).
+
+## Name and branding
+
+The name "Heardy" and the logo/icon artwork (`Heardy_icon.png` and the branding files under `assets/`) are NOT licensed
+for use under the GPL. Forks should use their own name and icon.

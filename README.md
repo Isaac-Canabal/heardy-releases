@@ -1,4 +1,55 @@
-# heardy-releases
+# Heardy
 
-Binarios de distribución de Heardy (APK de Android, instalador de Windows), publicados como GitHub Releases —
-ver `releases/latest/download/Heardy.apk` y `releases/latest/download/Heardy-Setup.exe`.
+Heardy es un reproductor y biblioteca de música para Android y Windows. Trabaja sobre los archivos de audio que ya tenés en el dispositivo, los organiza en playlists, lee su metadata y los reproduce sin backend, sin cuenta y sin conexión. Lo demás (letras, estadísticas, sincronización entre dispositivos, importar desde un enlace) es opcional y se suma encima sin cambiar eso.
+
+Este repositorio contiene el **código fuente de la app** y publica los binarios de cada versión como [Releases](../../releases).
+
+## Descargas
+
+Siempre la última versión:
+
+- **Android**: [`Heardy.apk`](../../releases/latest/download/Heardy.apk). Al instalar fuera de una tienda, Android pide permitir "orígenes desconocidos" para el navegador o el gestor de archivos.
+- **Windows**: [`Heardy-Setup.exe`](../../releases/latest/download/Heardy-Setup.exe). El instalador no está firmado con certificado, así que SmartScreen avisa de "editor desconocido" la primera vez: *Más información → Ejecutar de todas formas*.
+- **iOS**: no hay versión distribuida. Las releases pueden incluir un `Heardy-unsigned.ipa` sin firmar, experimental, que solo sirve para quien lo firme por su cuenta.
+
+Las releases se construyen automáticamente por GitHub Actions a partir de una etiqueta `vX.Y.Z` (ver `.github/workflows/release.yml`).
+
+## Qué hace
+
+- **Biblioteca local**: una carpeta elegida una vez; escaneo incremental que reconoce archivos movidos o renombrados por el hash del audio; nada se borra solo.
+- **Reproducción**: segundo plano con controles del sistema, letras sincronizadas con traducción, cola reordenable, aleatorio, repetición, temporizador de apagado.
+- **Estadísticas** de escucha, con imagen para compartir.
+- **Escritorio (Windows)**: interfaz de tres columnas con panel "Reproduciendo ahora".
+- **Cuenta opcional**: sincroniza un índice de la biblioteca (títulos, playlists, historial), nunca el audio.
+- **Importar desde un enlace (opcional)**: usa un servidor de descargas; el audio importado acaba como un archivo más en tu carpeta. Lo que importes es responsabilidad tuya: solo contenido sobre el que tengas derechos.
+
+## Compilar desde el código fuente
+
+Requisitos: Flutter estable (ver `environment` en `pubspec.yaml`), JDK 17 y Android SDK para el APK, Visual Studio con la carga de trabajo de C++ para Windows, y [Inno Setup 6](https://jrsoftware.org/isinfo.php) para el instalador.
+
+```bash
+flutter pub get
+flutter gen-l10n
+flutter run                      # Android conectado, o `-d windows`
+flutter build apk --release      # APK (necesita tu propia firma, ver abajo)
+flutter build windows --release  # build/windows/x64/runner/Release/
+flutter analyze && flutter test
+```
+
+Instalador de Windows, tras `flutter build windows --release`:
+
+```bash
+ISCC.exe windows\installer\heardy.iss   # deja build\windows\installer\Heardy-Setup.exe
+```
+
+**Firma de Android**: `android/app/build.gradle` espera un keystore en `heardy-release-key.jks` (raíz del repo) y un `android/keystore.properties` con `storePassword`, `keyPassword` y `keyAlias`. Ninguno de los dos se versiona; para pruebas propias genera tu keystore con `keytool`.
+
+**Servidor**: la app apunta por defecto al servidor oficial del proyecto. Para otro, compilar con `--dart-define=HEARDY_OFFICIAL_SERVER_URL=...`. Las funciones con cuenta usan el proyecto de Firebase del proyecto (`android/app/google-services.json`); si compilas tu propia variante, sustituye esa configuración por la tuya.
+
+## Licencia
+
+Heardy se distribuye bajo la **GNU General Public License v3.0**; ver [`LICENSE`](LICENSE). Incluye componentes de terceros con sus propias licencias; ver [`NOTICE.md`](NOTICE.md).
+
+## Nombre y marca
+
+El nombre "Heardy" y el logotipo/ícono (`Heardy_icon.png` y los archivos de marca bajo `assets/`) **no** se licencian para uso bajo la GPL. Si haces un fork, usa tu propio nombre e ícono.
