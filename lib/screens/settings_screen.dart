@@ -18,6 +18,7 @@ import '../services/artwork_repair_service.dart';
 import '../services/download_source.dart';
 import '../services/storage_service.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/max_width_center.dart';
 import '../models/statistics_data.dart';
 import '../services/share_image_service.dart';
 import '../services/statistics_service.dart';
@@ -119,7 +120,7 @@ class SettingsScreen extends StatelessWidget {
 
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 90),
+        padding: const EdgeInsets.fromLTRB(kScreenGutter, 16, kScreenGutter, 90),
         children: [
           Text(
             l10n.settingsTitle,
@@ -1465,7 +1466,7 @@ class _CustomThemeSheetState extends State<_CustomThemeSheet> {
         padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: SingleChildScrollView(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 20, kScreenGutter, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,

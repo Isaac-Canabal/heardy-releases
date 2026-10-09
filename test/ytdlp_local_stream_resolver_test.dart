@@ -153,4 +153,76 @@ void main() {
       await maybeUpdateYtdlp('${dir.path}\\y.exe', runner: (e, a, t) async => throw const ProcessException('y', []));
     });
   });
+
+  group('ytdlpResolveArguments', () {
+    test('pide sólo los campos necesarios y no usa --dump-json', () {
+      final a = ytdlpResolveArguments(id);
+      expect(a, containsAll(['--no-playlist', '--no-check-formats', '-O', ytdlpOutputTemplate]));
+      expect(a, isNot(contains('--dump-json')));
+      expect(a.sublist(a.length - 2), ['--', 'https://www.youtube.com/watch?v=$id']);
+    });
+  });
+
+  group('CachingStreamResolver', () {
+    StreamInfo info(String vid, int? expires) => StreamInfo(
+          videoId: vid,
+          url: 'https://x.googlevideo.com/$vid',
+          mimeType: 'audio/mp4',
+          expiresAt: expires,
+          contentLength: null,
+          durationSeconds: 10,
+          httpHeaders: const {},
+          audioOnly: true,
+          bitrateKbps: null,
+        );
+
+    test('reutiliza hasta el margen previo a expire y luego vuelve a resolver', () async {
+      var clock = DateTime.utc(2026, 1, 1);
+      final expires = clock.add(const Duration(hours: 6)).millisecondsSinceEpoch ~/ 1000;
+      var calls = 0;
+      final r = CachingStreamResolver(_FakeResolver((v) async => info(v, expires + calls++ * 0)),
+          now: () => clock);
+      await r.resolve(id);
+      await r.resolve(id);
+      expect(calls, 1);
+      clock = clock.add(const Duration(hours: 6) - const Duration(seconds: streamCacheSafetySeconds - 1));
+      await r.resolve(id);
+      expect(calls, 2);
+    });
+
+    test('une resoluciones simultáneas y no cachea fallos', () async {
+      var calls = 0;
+      final gate = Completer<void>();
+      final r = CachingStreamResolver(_FakeResolver((v) async {
+        calls++;
+        await gate.future;
+        if (calls == 1) throw const DownloadSourceException(DownloadSourceErrorKind.network, 'x');
+        return info(v, null);
+      }));
+      final a = r.resolve(id);
+      final b = r.resolve(id);
+      gate.complete();
+      await expectLater(a, throwsA(isA<DownloadSourceException>()));
+      await expectLater(b, throwsA(isA<DownloadSourceException>()));
+      expect(calls, 1);
+      expect((await r.resolve(id)).videoId, id);
+      expect(calls, 2);
+    });
+
+    test('sin expire usa el TTL de respaldo y ids distintos no se mezclan', () async {
+      final now = DateTime.utc(2026, 1, 1);
+      expect(streamCacheDeadline(info(id, null), now), now.add(streamCacheFallbackTtl));
+      final r = CachingStreamResolver(_FakeResolver((v) async => info(v, null)));
+      expect((await r.resolve('aaaaaaaaaaa')).videoId, 'aaaaaaaaaaa');
+      expect((await r.resolve('bbbbbbbbbbb')).videoId, 'bbbbbbbbbbb');
+    });
+  });
+}
+
+class _FakeResolver implements StreamResolver {
+  final Future<StreamInfo> Function(String) _f;
+  _FakeResolver(this._f);
+
+  @override
+  Future<StreamInfo> resolve(String videoId) => _f(videoId);
 }

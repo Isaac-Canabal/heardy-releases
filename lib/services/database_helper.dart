@@ -3,6 +3,9 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/song.dart';
 import '../models/playlist.dart';
+import '../models/history_entry.dart';
+import 'explore_logic.dart' show youtubeVideoId;
+import 'history_logic.dart' show maxStreamHistoryRows;
 import 'library_storage.dart';
 import 'app_log.dart';
 
@@ -24,7 +27,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 14,
+      version: 15,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: _onConfigure,
@@ -112,6 +115,8 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_play_history_synced ON play_history(syncedAt)',
     );
+    await db.execute(_createStreamHistorySql);
+    await db.execute(_createStreamHistoryIndexSql);
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -246,7 +251,29 @@ class DatabaseHelper {
         'CREATE INDEX IF NOT EXISTS idx_play_history_synced ON play_history(syncedAt)',
       );
     }
+    if (oldVersion < 15) {
+      // Historial de streaming: sólo local, no se sincroniza ni cuenta en
+      // estadísticas (no hay fila en `songs`).
+      await db.execute(_createStreamHistorySql);
+      await db.execute(_createStreamHistoryIndexSql);
+    }
   }
+
+  /// Una fila por pista (clave = id de vídeo): volver a oírla actualiza
+  /// `playedAt`. Sin FK: no hay canción local detrás.
+  static const _createStreamHistorySql = '''
+      CREATE TABLE IF NOT EXISTS stream_history (
+        videoId TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT NOT NULL,
+        artUrl TEXT NOT NULL,
+        durationSeconds INTEGER NOT NULL,
+        playedAt TEXT NOT NULL
+      )
+    ''';
+
+  static const _createStreamHistoryIndexSql =
+      'CREATE INDEX IF NOT EXISTS idx_stream_history_played ON stream_history(playedAt)';
 
   /// Persisted so an in-progress batch survives the app being killed.
   /// Deliberately NOT foreign-keyed to `playlists`: a queued job whose target
@@ -1014,6 +1041,68 @@ class DatabaseHelper {
         'playedAtUtc': now.toUtc().toIso8601String(),
       },
     );
+  }
+
+  /// Anota (o refresca) una reproducción por streaming y poda el historial a
+  /// [maxRows] entradas.
+  Future<void> recordStreamPlay(
+    HistoryEntry entry, {
+    int maxRows = maxStreamHistoryRows,
+  }) async {
+    final id = entry.videoId;
+    if (id == null || id.isEmpty) return;
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.insert('stream_history', entry.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      await txn.rawDelete(
+        'DELETE FROM stream_history WHERE videoId NOT IN '
+        '(SELECT videoId FROM stream_history ORDER BY playedAt DESC LIMIT ?)',
+        [maxRows],
+      );
+    });
+  }
+
+  Future<List<HistoryEntry>> getStreamHistory({int limit = maxStreamHistoryRows}) async {
+    final db = await database;
+    final rows = await db.query('stream_history', orderBy: 'playedAt DESC', limit: limit);
+    return [for (final r in rows) HistoryEntry.fromStreamMap(r)];
+  }
+
+  Future<void> clearStreamHistory() async {
+    final db = await database;
+    await db.delete('stream_history');
+  }
+
+  /// Última reproducción de cada canción presente (una fila por canción), de
+  /// `play_history`; sólo lectura.
+  Future<List<HistoryEntry>> getLocalHistory({int limit = maxStreamHistoryRows}) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT s.*, h.lastPlayed
+      FROM songs s
+      JOIN (SELECT songId, MAX(playDate) AS lastPlayed FROM play_history GROUP BY songId) h
+        ON h.songId = s.id
+      WHERE s.missing = 0
+      ORDER BY h.lastPlayed DESC
+      LIMIT ?
+    ''', [limit]);
+    return [
+      for (final r in rows)
+        () {
+          final song = Song.fromMap(r);
+          return HistoryEntry(
+            isStream: false,
+            songId: song.id,
+            videoId: youtubeVideoId(song.sourceUrl),
+            title: song.title,
+            artist: song.artist,
+            artPath: song.artPath,
+            durationSeconds: song.duration,
+            playedAt: DateTime.parse(r['lastPlayed'] as String),
+            song: song,
+          );
+        }(),
+    ];
   }
 
   /// Canciones presentes ordenadas por su última reproducción, una fila por

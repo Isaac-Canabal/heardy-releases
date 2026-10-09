@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
+import '../widgets/max_width_center.dart';
 import '../models/explore.dart';
 import '../models/song.dart';
 import '../providers/auth_provider.dart';
@@ -245,7 +246,7 @@ class _ExploreScreenState extends State<ExploreScreen>
 
   Widget _buildHeader(AppLocalizations l10n) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+      padding: const EdgeInsets.fromLTRB(kScreenGutter, 12, kScreenGutter, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

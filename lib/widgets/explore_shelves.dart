@@ -8,6 +8,7 @@ import '../models/song.dart';
 import '../providers/explore_provider.dart';
 import '../services/download_source.dart';
 import '../theme/app_theme.dart';
+import 'desktop_horizontal_scroller.dart';
 import 'skeleton_box.dart';
 
 const double kExploreGutter = 16;
@@ -135,11 +136,12 @@ class ExploreHorizontalList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return DesktopHorizontalScroller(
       height: height,
-      child: ListView.separated(
+      builder: (context, controller, extra) => ListView.separated(
+        controller: controller,
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: kExploreGutter),
+        padding: const EdgeInsets.symmetric(horizontal: kExploreGutter).add(extra),
         itemCount: itemCount,
         separatorBuilder: (_, __) => SizedBox(width: spacing),
         itemBuilder: itemBuilder,
@@ -697,11 +699,12 @@ class MoodChipsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return DesktopHorizontalScroller(
       height: 40,
-      child: ListView.separated(
+      builder: (context, controller, extra) => ListView.separated(
+        controller: controller,
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: kExploreGutter),
+        padding: const EdgeInsets.symmetric(horizontal: kExploreGutter).add(extra),
         itemCount: moods.length,
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (_, i) => ActionChip(

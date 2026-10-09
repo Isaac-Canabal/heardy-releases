@@ -11,7 +11,9 @@ import '../theme/app_theme.dart';
 import '../widgets/desktop_shell_scope.dart';
 import '../widgets/username_claim_sheet.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/max_width_center.dart';
 import 'friends_screen.dart';
+import 'history_screen.dart';
 import 'notifications_screen.dart';
 import '../services/friendly_error.dart';
 
@@ -48,7 +50,7 @@ class _HomeScreenState extends State<HomeScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 12, kScreenGutter, 0),
             child: Row(
               children: [
                 Expanded(
@@ -91,7 +93,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 18, kScreenGutter, 8),
             child: TextField(
               controller: _searchController,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
@@ -106,11 +108,12 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+          const _HistoryEntryRow(),
           Expanded(
             child: playlists.isEmpty
                 ? _buildEmptyState()
                 : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 90),
+                    padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 90),
                     itemCount: playlists.length,
                     itemBuilder: (context, index) {
                       return _PlaylistCard(playlist: playlists[index]);
@@ -208,6 +211,32 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Text(l10n.commonCreate, style: TextStyle(color: AppTheme.primaryLight, fontWeight: FontWeight.bold)),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Acceso al historial de escuchado, bajo el buscador.
+class _HistoryEntryRow extends StatelessWidget {
+  const _HistoryEntryRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kScreenGutter, 0, kScreenGutter, 4),
+      child: ListTile(
+        key: const Key('home_history_row'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        leading: Icon(Icons.history_rounded, color: AppTheme.primaryLight),
+        title: Text(
+          l10n.historyTitle,
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
+        trailing: Icon(Icons.chevron_right_rounded, color: Colors.white.withValues(alpha: 0.4)),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const HistoryScreen()),
+        ),
       ),
     );
   }

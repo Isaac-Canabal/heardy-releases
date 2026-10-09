@@ -77,7 +77,8 @@ StreamQueueSeed buildStreamQueue(Iterable<RemoteTrack> tracks, String startId) {
 }
 
 /// Entrada de la cola publicada para [track]; sin URL (se resuelve al sonar) y
-/// sin rutas locales. [resolvedSeconds] > 0 manda sobre la duración del listado.
+/// sin rutas locales (la carátula va en `artUri`). [resolvedSeconds] > 0
+/// manda sobre la duración del listado.
 MediaItem streamMediaItem(RemoteTrack track, {int resolvedSeconds = 0}) {
   final seconds = resolvedSeconds > 0 ? resolvedSeconds : track.durationSeconds;
   final art = Uri.tryParse(upscaleThumbnail(track.thumbnailUrl, size: 544));

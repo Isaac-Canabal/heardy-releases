@@ -629,5 +629,25 @@
   "exploreArtistAbout": "Acerca de",
   "exploreArtistReadMore": "Ver más",
   "exploreArtistReadLess": "Ver menos",
-  "exploreArtistEmpty": "Este artista no tiene contenido disponible"
+  "exploreArtistEmpty": "Este artista no tiene contenido disponible",
+
+  "historyTitle": "Historial",
+  "historyTooltip": "Historial",
+  "historyEmptyTitle": "Aún no has escuchado nada",
+  "historyEmptyBody": "Lo que escuches, también por streaming, aparecerá aquí.",
+  "historyClearTooltip": "Borrar historial",
+  "historyClearTitle": "¿Borrar el historial?",
+  "historyClearBody": "Se vaciará esta lista. Tus estadísticas y tu biblioteca no se tocan.",
+  "historyClearConfirm": "Borrar",
+  "historyClearedSnack": "Historial borrado",
+  "historyStreamLabel": "Streaming",
+  "historyAgeJustNow": "Ahora mismo",
+  "historyAgeMinutes": "Hace {count} min",
+  "@historyAgeMinutes": {"placeholders": {"count": {"type": "int"}}},
+  "historyAgeHours": "Hace {count} h",
+  "@historyAgeHours": {"placeholders": {"count": {"type": "int"}}},
+  "historyAgeYesterday": "Ayer",
+  "historyAgeDays": "Hace {count} días",
+  "@historyAgeDays": {"placeholders": {"count": {"type": "int"}}},
+  "historyLoadFailed": "No se pudo cargar el historial"
 }

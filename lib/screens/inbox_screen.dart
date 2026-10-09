@@ -10,6 +10,7 @@ import '../services/storage_service.dart';
 import '../services/library_scan_service.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/max_width_center.dart';
 import '../services/friendly_error.dart';
 
 /// Batch triage for songs imported loose in the library root, with no
@@ -244,7 +245,7 @@ class _InboxScreenState extends State<InboxScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 12, kScreenGutter, 0),
             child: Row(
               children: [
                 Expanded(
@@ -283,7 +284,7 @@ class _InboxScreenState extends State<InboxScreen> {
           ),
           if (libraryRootUri != null && !_loading)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+              padding: const EdgeInsets.fromLTRB(kScreenGutter, 14, kScreenGutter, 0),
               child: Row(
                 children: [
                   ChoiceChip(
@@ -302,7 +303,7 @@ class _InboxScreenState extends State<InboxScreen> {
             ),
           if (_activeSongs.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+              padding: const EdgeInsets.fromLTRB(kScreenGutter, 12, kScreenGutter, 0),
               child: Row(
                 children: [
                   TextButton.icon(
@@ -366,7 +367,7 @@ class _InboxScreenState extends State<InboxScreen> {
           ),
           if (hasSelection)
             Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              padding: const EdgeInsets.fromLTRB(kScreenGutter, 12, kScreenGutter, 16),
               decoration: BoxDecoration(
                 color: AppTheme.surface,
                 boxShadow: [
@@ -723,7 +724,7 @@ class _AssignToPlaylistsSheetState extends State<_AssignToPlaylistsSheet> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+                padding: const EdgeInsets.fromLTRB(kScreenGutter, 20, kScreenGutter, 8),
                 child: Text(
                   l10n.inboxAssignSheetTitle,
                   style: const TextStyle(
@@ -756,7 +757,7 @@ class _AssignToPlaylistsSheetState extends State<_AssignToPlaylistsSheet> {
                   ),
                 ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 0),
                 child: TextField(
                   controller: _newPlaylistController,
                   onChanged: (_) => setState(() {}),

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:saf_util/saf_util.dart';
+import '../models/history_entry.dart';
 import 'database_helper.dart';
 import 'playback_state_service.dart';
 import 'app_log.dart';
@@ -306,7 +307,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   // `queueIndex`/`mediaItem` apuntan a la actual; como el player sólo tiene una
   // fuente, su `currentIndex` (siempre 0) se ignora y manda `_streamIndex`.
   // Tocar una entrada salta a ella resolviéndola en el momento. Es efímera:
-  // sin historial ni restauración.
+  // sin restauración ni fila en `songs` (sólo una entrada en `stream_history`).
   List<RemoteTrack>? _streamTracks;
   List<MediaItem> _streamItems = const [];
   int _streamIndex = 0;
@@ -322,7 +323,6 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   StreamResolver? _streamResolver;
   String? _prefetchVideoId;
   Future<StreamInfo>? _prefetch;
-
   bool get isStreamQueueActive => _streamTracks != null;
 
   void _cancelStreamQueue() {
@@ -434,6 +434,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         if (!_streamGen.isCurrent(token)) return;
         mediaItem.add(item);
         playbackState.add(_buildPlaybackState(_lastEvent));
+        _recordStreamHistory(track, info.durationSeconds);
         _streamReady = true;
         // play() de just_audio no vuelve hasta que la pista termina o se pausa.
         _player.play().catchError((Object _) {});
@@ -991,10 +992,27 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     await _player.play();
   }
 
+  /// Anota la pista en el historial de streaming (sólo local); no bloquea ni
+  /// lanza.
+  void _recordStreamHistory(RemoteTrack track, int resolvedSeconds) {
+    DatabaseHelper.instance
+        .recordStreamPlay(HistoryEntry(
+          isStream: true,
+          videoId: track.id,
+          title: track.title,
+          artist: track.artist,
+          artUrl: track.thumbnailUrl,
+          durationSeconds: resolvedSeconds > 0 ? resolvedSeconds : track.durationSeconds,
+          playedAt: DateTime.now(),
+        ))
+        .catchError((Object e) => appLog('Historial de streaming no guardado (${e.runtimeType})'));
+  }
+
   /// Reproduce una pista remota por su URL directa, sin descargarla.
   ///
   /// Es efímera: cola de un solo elemento que no pasa por `_filterPlayable`
-  /// (no es un archivo), no cuenta como escucha y no se guarda para
+  /// (no es un archivo), no cuenta como escucha en estadísticas (sólo deja una entrada en
+  /// `stream_history`) y no se guarda para
   /// restaurar (ver `_saveCurrentState`). La URL nunca va al log.
   Future<void> playStream(RemoteTrack track, StreamInfo info) async {
     final item = streamMediaItem(track, resolvedSeconds: info.durationSeconds);
@@ -1023,6 +1041,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
           .timeout(const Duration(seconds: 45));
 
       mediaItem.add(item);
+      _recordStreamHistory(track, info.durationSeconds);
       _streamReady = true;
       // play() de just_audio no vuelve hasta que la pista termina o se pausa:
       // esperarlo dejaba a quien llamó (y su "cargando") bloqueado toda la

@@ -24,6 +24,8 @@ import '../widgets/remote_track_actions_mixin.dart';
 import '../widgets/remote_track_tile.dart';
 import '../widgets/song_tile.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/desktop_horizontal_scroller.dart';
+import '../widgets/max_width_center.dart';
 import '../services/friendly_error.dart';
 import '../services/input_sanitizer.dart';
 
@@ -222,7 +224,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: EdgeInsets.fromLTRB(widget.standalone ? 8 : 20, 12, 20, 0),
+            padding: EdgeInsets.fromLTRB(widget.standalone ? 8 : kScreenGutter, 12, kScreenGutter, 0),
             child: Row(
               children: [
                 if (widget.standalone)
@@ -244,7 +246,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 16, kScreenGutter, 0),
             child: SegmentedButton<_SearchScope>(
               segments: [
                 ButtonSegment(
@@ -263,7 +265,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 14, kScreenGutter, 8),
             child: TextField(
               key: const Key('search_field'),
               controller: _controller,
@@ -315,11 +317,12 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
       SearchKind.albums: l10n.searchKindAlbums,
       SearchKind.artists: l10n.searchKindArtists,
     };
-    return SizedBox(
+    return DesktopHorizontalScroller(
       height: 44,
-      child: ListView(
+      builder: (context, controller, extra) => ListView(
+        controller: controller,
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.symmetric(horizontal: kScreenGutter).add(extra),
         children: [
           for (final kind in SearchKind.values)
             Padding(
@@ -406,7 +409,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
     }
     if (!isSongs) return _buildExploreResults();
     return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 90),
+      padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 90),
       itemCount: _youtubeResults.length,
       itemBuilder: (context, index) => RemoteTrackTile(
         track: _youtubeResults[index],
@@ -464,7 +467,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
           )),
         ),
     ];
-    return ListView(padding: const EdgeInsets.fromLTRB(16, 8, 16, 90), children: tiles);
+    return ListView(padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 90), children: tiles);
   }
 
   Widget _buildHint(

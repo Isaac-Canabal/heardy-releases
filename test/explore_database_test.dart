@@ -109,4 +109,26 @@ void main() {
       expect(await DatabaseHelper.instance.getMostPlayedYoutubeSourceUrls(limit: 3), isEmpty);
     });
   });
+
+  group('getLocalHistory', () {
+    test('una fila por canción presente con su última reproducción, sin las perdidas', () async {
+      final h = DatabaseHelper.instance;
+      await h.insertSong(_song('s1', 'Uno', sourceUrl: _yt('aaaaaaaaaaa')));
+      await h.insertSong(_song('s2', 'Dos'));
+      await h.insertSong(_song('s3', 'Tres', missing: true));
+      final now = DateTime(2026, 5, 10, 12);
+      await _play('s1', now.subtract(const Duration(days: 2)));
+      await _play('s1', now.subtract(const Duration(hours: 1)));
+      await _play('s2', now.subtract(const Duration(hours: 5)));
+      await _play('s3', now);
+
+      final rows = await h.getLocalHistory();
+
+      expect([for (final r in rows) r.songId], ['s1', 's2']);
+      expect(rows.first.playedAt, now.subtract(const Duration(hours: 1)));
+      expect(rows.first.videoId, 'aaaaaaaaaaa');
+      expect(rows.first.isStream, isFalse);
+      expect(rows.first.song?.id, 's1');
+    });
+  });
 }

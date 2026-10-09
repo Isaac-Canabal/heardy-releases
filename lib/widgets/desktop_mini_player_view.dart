@@ -7,6 +7,7 @@ import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_mini_mode_service.dart';
 import '../services/lyrics_service.dart';
+import '../services/stream_queue_logic.dart';
 
 /// Contenido de la ventana en modo "minimizar y superponer": carátula,
 /// la línea de letra actual y transporte básico (anterior/pausa/siguiente),
@@ -72,7 +73,12 @@ class _DesktopMiniPlayerViewState extends State<DesktopMiniPlayerView> {
             fit: StackFit.expand,
             children: [
               if (item != null)
-                SmartAlbumArt(artPath: artPath, title: item.title, size: 180)
+                SmartAlbumArt(
+                  artPath: artPath,
+                  artUrl: remoteArtUrlFor(artPath, item.artUri),
+                  title: item.title,
+                  size: 180,
+                )
               else
                 const ColoredBox(color: Colors.black),
               DecoratedBox(

@@ -6,6 +6,8 @@ import '../l10n/app_localizations.dart';
 import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_mini_mode_service.dart';
+import '../services/stream_queue_logic.dart';
+import 'add_current_track.dart';
 import '../theme/app_theme.dart';
 
 /// Barra inferior del escritorio, sólo bajo la columna de contenido (del
@@ -78,6 +80,7 @@ class _DesktopPlaybackBarState extends State<DesktopPlaybackBar> {
               ),
               const SizedBox(width: 12),
               const DesktopVolumeControl(),
+              if (!widget.panelOpen) AddToPlaylistIconButton(item: item),
               IconButton(
                 tooltip: l10n.desktopMiniModeEnter,
                 icon: const Icon(
@@ -183,6 +186,7 @@ class _TrackInfo extends StatelessWidget {
   Widget build(BuildContext context) {
     final artPath = item.extras?['artPath'] as String? ?? '';
     final hasArt = artPath.isNotEmpty && File(artPath).existsSync();
+    final artUrl = remoteArtUrlFor(artPath, item.artUri);
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: onTap,
@@ -201,6 +205,16 @@ class _TrackInfo extends StatelessWidget {
                         width: 44,
                         height: 44,
                         fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => _placeholder(item.title),
+                      )
+                    : artUrl != null
+                    ? Image.network(
+                        artUrl,
+                        key: ValueKey(artUrl),
+                        width: 44,
+                        height: 44,
+                        fit: BoxFit.cover,
+                        cacheHeight: 132,
                         errorBuilder: (_, __, ___) => _placeholder(item.title),
                       )
                     : _placeholder(item.title),

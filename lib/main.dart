@@ -305,8 +305,11 @@ void main() async {
   if (Platform.isWindows) {
     final ytdlpPath = await prepareWindowsYtdlp();
     configureWindowsStreaming(ytdlpPath);
-    if (ytdlpPath != null) unawaited(maybeUpdateYtdlp(ytdlpPath));
-    streamResolver = WindowsYtdlpStreamResolver(ytdlpPath ?? '');
+    // -U compite por CPU/red con la primera resolución: se pospone.
+    if (ytdlpPath != null) {
+      unawaited(Future<void>.delayed(const Duration(minutes: 3), () => maybeUpdateYtdlp(ytdlpPath)));
+    }
+    streamResolver = CachingStreamResolver(WindowsYtdlpStreamResolver(ytdlpPath ?? ''));
   } else {
     streamResolver = defaultStreamResolver();
   }

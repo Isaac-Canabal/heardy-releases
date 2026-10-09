@@ -13,6 +13,7 @@ import '../widgets/mini_player.dart';
 import '../widgets/playlist_target_sheet.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
+import '../widgets/max_width_center.dart';
 import '../services/friendly_error.dart';
 
 /// Entradas de [remote] cuyo `sourceUrl` todavía no está entre las canciones
@@ -436,7 +437,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
 
   Widget _buildSearchField() {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 100, 16, 8),
+      margin: const EdgeInsets.fromLTRB(kScreenGutter, 100, kScreenGutter, 8),
       decoration: AppTheme.glassCard(),
       child: TextField(
         controller: _searchController,
@@ -572,7 +573,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              padding: const EdgeInsets.fromLTRB(kScreenGutter, 20, kScreenGutter, 8),
               child: Text(
                 song.title,
                 maxLines: 1,

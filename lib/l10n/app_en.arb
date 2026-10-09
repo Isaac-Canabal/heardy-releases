@@ -485,5 +485,25 @@
   "exploreArtistAbout": "About",
   "exploreArtistReadMore": "Show more",
   "exploreArtistReadLess": "Show less",
-  "exploreArtistEmpty": "This artist has no content available"
+  "exploreArtistEmpty": "This artist has no content available",
+
+  "historyTitle": "History",
+  "historyTooltip": "History",
+  "historyEmptyTitle": "You haven't listened to anything yet",
+  "historyEmptyBody": "What you listen to, streaming included, will show up here.",
+  "historyClearTooltip": "Clear history",
+  "historyClearTitle": "Clear history?",
+  "historyClearBody": "This list will be emptied. Your statistics and library are not affected.",
+  "historyClearConfirm": "Clear",
+  "historyClearedSnack": "History cleared",
+  "historyStreamLabel": "Streaming",
+  "historyAgeJustNow": "Just now",
+  "historyAgeMinutes": "{count} min ago",
+  "@historyAgeMinutes": {"placeholders": {"count": {"type": "int"}}},
+  "historyAgeHours": "{count} h ago",
+  "@historyAgeHours": {"placeholders": {"count": {"type": "int"}}},
+  "historyAgeYesterday": "Yesterday",
+  "historyAgeDays": "{count} days ago",
+  "@historyAgeDays": {"placeholders": {"count": {"type": "int"}}},
+  "historyLoadFailed": "Couldn't load the history"
 }

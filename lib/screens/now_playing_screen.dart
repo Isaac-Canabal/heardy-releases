@@ -8,9 +8,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../services/audio_player_handler.dart';
 import '../services/explore_logic.dart';
-import '../providers/music_provider.dart';
-import '../widgets/playlist_target_sheet.dart';
-import '../widgets/remote_track_actions_mixin.dart';
+import '../widgets/add_current_track.dart';
 import '../services/lyrics_service.dart';
 import '../services/translation_service.dart';
 import '../providers/settings_provider.dart';
@@ -26,14 +24,22 @@ const Color kNowPlayingFallbackColor = Color(0xFF1E1E1E);
 /// por esta pantalla y el panel de escritorio; nunca lanza — sin carátula, o
 /// si falla la extracción, devuelve el gris neutro de siempre. `size` le
 /// pide a PaletteGenerator una miniatura en vez de la imagen a resolución
-/// completa, que es la mitad del costo.
-Future<Color> dominantColorForArt(String artPath) async {
-  if (artPath.isEmpty) return kNowPlayingFallbackColor;
-  final file = File(artPath);
-  if (!file.existsSync()) return kNowPlayingFallbackColor;
+/// completa, que es la mitad del costo. [artUrl] (stream, sin archivo local)
+/// la baja por red; si falla, cae al gris neutro.
+Future<Color> dominantColorForArt(String artPath, {String? artUrl}) async {
+  final ImageProvider provider;
+  if (artPath.isNotEmpty) {
+    final file = File(artPath);
+    if (!file.existsSync()) return kNowPlayingFallbackColor;
+    provider = FileImage(file);
+  } else if (artUrl != null) {
+    provider = NetworkImage(artUrl);
+  } else {
+    return kNowPlayingFallbackColor;
+  }
   try {
     final palette = await PaletteGenerator.fromImageProvider(
-      FileImage(file),
+      provider,
       size: const Size(100, 100),
       maximumColorCount: 12,
     );
@@ -58,34 +64,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   MediaItem? _currentMediaItem;
   Color _dominantColor = kNowPlayingFallbackColor;
 
-  Future<void> _addCurrent(MediaItem item) async {
-    switch (nowPlayingAddAction(item)) {
-      case NowPlayingAddAction.none:
-        return;
-      case NowPlayingAddAction.downloadStream:
-        await enqueueRemoteTrackDownload(
-          context,
-          remoteTrackFromStreamItem(item)!,
-          isMounted: () => mounted,
-        );
-      case NowPlayingAddAction.addLocal:
-        final choice = await pickTargetPlaylist(context);
-        if (choice == null || !mounted) return;
-        final playlistId = await resolveTargetPlaylistId(context, choice);
-        if (playlistId == null || !mounted) return;
-        final music = context.read<MusicProvider>();
-        final l10n = AppLocalizations.of(context)!;
-        final messenger = ScaffoldMessenger.of(context);
-        await music.copySongToPlaylist(item.id, playlistId);
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(l10n.nowPlayingAddedToPlaylistSnack(item.title)),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-    }
-  }
+  Future<void> _addCurrent(MediaItem item) =>
+      addCurrentTrackToPlaylist(context, item, isMounted: () => mounted);
 
   void _updatePalette(MediaItem? item) async {
     if (item == null) return;

@@ -6,6 +6,8 @@ import '../l10n/app_localizations.dart';
 import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_tray_service.dart';
+import '../services/stream_queue_logic.dart';
+import 'add_current_track.dart';
 import 'desktop_playback_bar.dart' show DesktopVolumeControl;
 
 /// El "reproduciendo ahora" del escritorio: la misma información que
@@ -56,9 +58,17 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
   Color _dominantColor = kNowPlayingFallbackColor;
   int _tab = 0;
 
+  String _artPathOf(MediaItem item) => item.extras?['artPath'] as String? ?? '';
+
+  String? _artUrlOf(MediaItem item) =>
+      remoteArtUrlFor(_artPathOf(item), item.artUri);
+
   Future<void> _updatePalette(MediaItem item) async {
     final artPath = item.extras?['artPath'] as String? ?? '';
-    final color = await dominantColorForArt(artPath);
+    final color = await dominantColorForArt(
+      artPath,
+      artUrl: remoteArtUrlFor(artPath, item.artUri),
+    );
     if (mounted && _currentId == item.id) {
       setState(() => _dominantColor = color);
     }
@@ -124,8 +134,8 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(16),
                               child: SmartAlbumArt(
-                                artPath:
-                                    item.extras?['artPath'] as String? ?? '',
+                                artPath: _artPathOf(item),
+                                artUrl: _artUrlOf(item),
                                 title: item.title,
                                 size: artSize,
                               ),
@@ -264,9 +274,8 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(16),
                                   child: SmartAlbumArt(
-                                    artPath:
-                                        item.extras?['artPath'] as String? ??
-                                        '',
+                                    artPath: _artPathOf(item),
+                                    artUrl: _artUrlOf(item),
                                     title: item.title,
                                     size: artSize,
                                   ),
@@ -347,7 +356,8 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
               .clamp(120.0, 460.0);
           return Center(
             child: _SpinningDisc(
-              artPath: item.extras?['artPath'] as String? ?? '',
+              artPath: _artPathOf(item),
+              artUrl: _artUrlOf(item),
               title: item.title,
               size: discSize,
             ),
@@ -403,6 +413,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                     ),
                   ),
           ),
+          if (item != null) AddToPlaylistIconButton(item: item),
           StreamBuilder<Duration?>(
             stream: audioHandler.sleepTimerStream,
             initialData: audioHandler.sleepTimerRemainingNow,
@@ -585,11 +596,13 @@ class _Controls extends StatelessWidget {
 /// letra en vez de acompañarla.
 class _SpinningDisc extends StatefulWidget {
   final String artPath;
+  final String? artUrl;
   final String title;
   final double size;
 
   const _SpinningDisc({
     required this.artPath,
+    this.artUrl,
     required this.title,
     required this.size,
   });
@@ -663,6 +676,7 @@ class _SpinningDiscState extends State<_SpinningDisc>
               children: [
                 SmartAlbumArt(
                   artPath: widget.artPath,
+                  artUrl: widget.artUrl,
                   title: widget.title,
                   size: widget.size,
                 ),

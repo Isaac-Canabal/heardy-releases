@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+/// Margen lateral simétrico de las pantallas principales.
+const double kScreenGutter = 16;
+
 /// Centra [child] con un ancho máximo, sin aflojar la altura — el problema
 /// real de `Center(child: ConstrainedBox(maxWidth: ...))`: `Center` afloja
 /// las restricciones en LOS DOS ejes, no sólo el ancho, así que cualquier
