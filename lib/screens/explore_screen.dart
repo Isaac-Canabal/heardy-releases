@@ -40,15 +40,25 @@ class ExploreScreen extends StatefulWidget {
   State<ExploreScreen> createState() => _ExploreScreenState();
 }
 
-class _ExploreScreenState extends State<ExploreScreen> with RemoteTrackActionsMixin<ExploreScreen> {
+class _ExploreScreenState extends State<ExploreScreen>
+    with RemoteTrackActionsMixin<ExploreScreen>, WidgetsBindingObserver {
   bool _networkRequested = false;
+  bool _startingPlay = false;
   String? _resolvingArtist;
 
   @override
   void initState() {
     super.initState();
     initRemoteTrackActions();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onActivated());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Volver a la app tras horas: sin esto Explorar seguía mostrando lo mismo
+    // hasta matar el proceso. El estrangulado (15 min) vive en el provider.
+    if (state == AppLifecycleState.resumed) _onActivated();
   }
 
   @override
@@ -59,6 +69,7 @@ class _ExploreScreenState extends State<ExploreScreen> with RemoteTrackActionsMi
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     disposeRemoteTrackActions();
     super.dispose();
   }
@@ -81,10 +92,11 @@ class _ExploreScreenState extends State<ExploreScreen> with RemoteTrackActionsMi
     if (!mounted || !widget.active) return;
     final provider = context.read<ExploreProvider>();
     // El historial cambia al escuchar; se relee cada vez que se abre la pestaña.
-    provider.loadLocal();
     if (_gate() == RemoteAccessGate.ok) {
       _networkRequested = true;
-      provider.loadNetwork();
+      provider.refreshIfStale();
+    } else {
+      provider.loadLocal();
     }
   }
 
@@ -93,11 +105,28 @@ class _ExploreScreenState extends State<ExploreScreen> with RemoteTrackActionsMi
     return _gate() == RemoteAccessGate.ok ? provider.refresh() : provider.loadLocal();
   }
 
-  Future<void> _playLocal(Song song, List<Song> list) async {
-    DesktopShellScope.maybeOf(context)?.openNowPlaying();
+  Future<void> _playLocal(Song song, List<Song> list) async {    DesktopShellScope.maybeOf(context)?.openNowPlaying();
     final handler = context.read<AudioPlayerHandler>();
     final label = AppLocalizations.of(context)!.exploreRecentTitle;
     await context.read<MusicProvider>().playSearchResults(list, song, handler, label);
+  }
+
+  /// Acción por defecto de una tarjeta: reproducir. Si la canción ya está en la
+  /// biblioteca se usa el archivo local (sin red); si no, streaming.
+  Future<void> _playTrack(RemoteTrack track) async {
+    if (_startingPlay || streamingTrackId != null) return;
+    _startingPlay = true;
+    try {
+      final local = await context.read<ExploreProvider>().findLocalSong(track.id);
+      if (!mounted) return;
+      if (local != null) {
+        await _playLocal(local, [local]);
+        return;
+      }
+      await listenRemoteTrack(track);
+    } finally {
+      _startingPlay = false;
+    }
   }
 
   void _openSearch([String? query]) =>
@@ -353,10 +382,10 @@ class _ExploreScreenState extends State<ExploreScreen> with RemoteTrackActionsMi
       itemCount: tracks.length,
       itemBuilder: (_, i) {
         final track = upscale ? withUpscaledThumbnail(tracks[i]) : tracks[i];
-        return RemoteTrackCard(
+        return ExploreTrackCard(
           track: track,
           onDownload: () => downloadRemoteTrack(track),
-          onListen: streamingSupported ? () => listenRemoteTrack(track) : null,
+          onPlay: streamingSupported ? () => _playTrack(track) : null,
           isLoadingStream: streamingTrackId == track.id,
         );
       },

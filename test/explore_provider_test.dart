@@ -175,4 +175,49 @@ void main() {
     expect(provider.charts.hasError, isFalse);
     expect(provider.charts.data, hasLength(1));
   });
+
+  test('refreshIfStale: fresco no vuelve a pedir; vencido sí; con error reintenta', () async {
+    var clock = DateTime(2026, 10, 9, 8);
+    final source = _FakeSource();
+    final provider = ExploreProvider(source: source, now: () => clock);
+
+    await provider.refreshIfStale();
+    expect(source.chartsCalls, 1);
+
+    clock = clock.add(const Duration(minutes: 10));
+    await provider.refreshIfStale();
+    expect(source.chartsCalls, 1);
+
+    clock = clock.add(const Duration(minutes: 6));
+    await provider.refreshIfStale();
+    expect(source.chartsCalls, 2);
+    // Mientras recarga conserva lo anterior (sin parpadeo a esqueleto).
+    expect(provider.charts.data, hasLength(1));
+
+    source.failCharts = true;
+    clock = clock.add(const Duration(hours: 1));
+    await provider.refreshIfStale();
+    expect(provider.charts.hasError, isTrue);
+    expect(provider.charts.data, hasLength(1));
+
+    // Una estantería caída no da el refresco por bueno: la siguiente entrada reintenta.
+    source.failCharts = false;
+    clock = clock.add(const Duration(minutes: 1));
+    await provider.refreshIfStale();
+    expect(provider.charts.hasError, isFalse);
+    expect(source.chartsCalls, 4);
+  });
+
+  test('findLocalSong encuentra la descargada por id de vídeo y no las que faltan', () async {
+    final h = DatabaseHelper.instance;
+    await h.insertSong(_song('s1', 'A', 'https://music.youtube.com/watch?v=$_a&list=z'));
+    final provider = ExploreProvider(source: _FakeSource());
+
+    expect((await provider.findLocalSong(_a))?.id, 's1');
+    expect(await provider.findLocalSong(_b), isNull);
+
+    final db = await h.database;
+    await db.update('songs', {'missing': 1}, where: 'id = ?', whereArgs: ['s1']);
+    expect(await provider.findLocalSong(_a), isNull);
+  });
 }

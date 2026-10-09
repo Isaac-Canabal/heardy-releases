@@ -83,13 +83,21 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       final library = await cloudSource.getLibrary();
       final localHashes = await DatabaseHelper.instance.getLocalFileHashes();
       final localSourceUrls = await DatabaseHelper.instance.getLocalSourceUrls();
-      final cloudSongs = library?.songs ?? const [];
+      // La nube es aditiva y acumula copias (misma canción con dos ids, misma
+      // playlist borrada y recreada): se colapsan antes de comparar para no
+      // emparejar, encolar ni recrear cada copia por separado.
+      final canonical = canonicalizeCloudIndex(
+        library?.songs ?? const [],
+        library?.playlists ?? const [],
+        library?.playlistSongs ?? const [],
+      );
+      final cloudSongs = canonical.songs;
       final missing = missingCloudSongs(cloudSongs, localHashes);
       if (!mounted) return;
 
       _cloudTotal = uniqueCloudSongCount(cloudSongs);
-      _cloudPlaylists = library?.playlists ?? const [];
-      _cloudPlaylistSongs = library?.playlistSongs ?? const [];
+      _cloudPlaylists = canonical.playlists;
+      _cloudPlaylistSongs = canonical.playlistSongs;
 
       // Sin corte por "no falta nada por hash" acá: una playlist con
       // `originalUrl` puede tener temas nuevos sumados al origen desde el
@@ -97,7 +105,14 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       // se descubre re-expandiendo el enlace, no comparando hashes.
       // `_matchMissingSongs` decide `upToDate` al final si de verdad no hay
       // nada que hacer.
-      await _matchMissingSongs(missing, localSourceUrls);
+      await _matchMissingSongs(
+        missing,
+        knownLocalSourceUrls(
+          localSourceUrls: localSourceUrls,
+          cloudSongs: cloudSongs,
+          localFileHashes: localHashes,
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -158,9 +173,10 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       final originalUrl = entry.value;
       try {
         final remote = await source.resolvePlaylist(originalUrl);
+        final seenTrackIds = <String>{};
         final matches = [
           for (final track in remote.entries)
-            if (track.sourceUrl.isEmpty || !localSourceUrls.contains(track.sourceUrl))
+            if (seenTrackIds.add(track.id) && !sourceUrlAlreadyKnown(track.sourceUrl, localSourceUrls))
               CloudSongMatch(
                 cloudSong: {'title': track.title, 'artist': track.artist},
                 youtubeTrack: track,
@@ -235,6 +251,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       for (final p in _cloudPlaylists)
         p['playlistId'] as String: (p['name'] as String?) ?? '',
     };
+    // Una playlist local con el mismo nombre ES la misma playlist: se reutiliza
+    // en vez de recrearla con el id de la nube.
+    final localIdByCloudId = localPlaylistIdByCloudId(
+      _cloudPlaylists,
+      [for (final p in musicProvider.playlists) (id: p.id, name: p.name)],
+    );
     final existingLocalIds = musicProvider.playlists.map((p) => p.id).toSet();
 
     var enqueued = 0;
@@ -253,14 +275,15 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       // anterior ya la trajo), esto no hace nada — `insertPlaylist` ignora
       // conflictos de id. Conservar el id evita duplicar la misma playlist
       // con dos identidades distintas entre dispositivos.
-      if (!existingLocalIds.contains(cloudPlaylistId)) {
+      final targetPlaylistId = localIdByCloudId[cloudPlaylistId] ?? cloudPlaylistId;
+      if (!existingLocalIds.contains(targetPlaylistId)) {
         final cloudPlaylist = _cloudPlaylists.firstWhere(
           (p) => p['playlistId'] == cloudPlaylistId,
           orElse: () => const {},
         );
         await DatabaseHelper.instance.insertPlaylist(
           Playlist(
-            id: cloudPlaylistId,
+            id: targetPlaylistId,
             name: playlistNameById[cloudPlaylistId] ?? 'Restaurada',
             creationDate: DateTime.now(),
             // Sin esto, una playlist restaurada pierde para siempre el botón
@@ -269,13 +292,15 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
             originalUrl: cloudPlaylist['originalUrl'] as String?,
           ),
         );
-        existingLocalIds.add(cloudPlaylistId);
+        existingLocalIds.add(targetPlaylistId);
       }
 
+      final queuedTrackIds = <String>{};
       for (final match in acceptable) {
+        if (!queuedTrackIds.add(match.youtubeTrack!.id)) continue;
         final ok = await downloadProvider.enqueueTrack(
           match.youtubeTrack!,
-          playlistId: cloudPlaylistId,
+          playlistId: targetPlaylistId,
           sourceType: 'restore',
           // Ver CloudSongMatch.metadataComplete: sólo el resolve completo de
           // UNA canción por su sourceUrl lo deja en true. Todo lo demás

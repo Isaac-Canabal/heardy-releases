@@ -327,11 +327,8 @@ class _ExploreArtistScreenState extends State<ExploreArtistScreen>
               (_, i) => RemoteTrackTile(
                 track: tracks[i],
                 onDownload: () => downloadRemoteTrack(tracks[i]),
-                onListen: !streamingSupported
-                    ? null
-                    : playQueue
-                        ? () => listenRemoteQueue(tracks, tracks[i])
-                        : () => listenRemoteTrack(tracks[i]),
+                onListen: null,
+                onPlay: () => playRemoteTrack(tracks[i], queue: playQueue ? tracks : null),
                 isLoadingStream: streamingTrackId == tracks[i].id,
               ),
               childCount: tracks.length,

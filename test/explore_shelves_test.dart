@@ -10,6 +10,7 @@ import 'package:heardy/l10n/app_localizations.dart';
 import 'package:heardy/models/explore.dart';
 import 'package:heardy/models/song.dart';
 import 'package:heardy/providers/explore_provider.dart';
+import 'package:heardy/services/download_source.dart';
 import 'package:heardy/widgets/explore_shelves.dart';
 
 Widget _host(Widget child) => MaterialApp(
@@ -150,5 +151,61 @@ void main() {
     expect(find.text('Miley'), findsOneWidget);
     await tester.tap(find.byKey(const Key('explore_related_UC1')));
     expect(tapped?.channelId, 'UC1');
+  });
+
+  group('ExploreTrackCard', () {
+    const track = RemoteTrack(
+      id: 'aaaaaaaaaaa',
+      title: 'Tema',
+      artist: 'Artista',
+      album: null,
+      durationSeconds: 100,
+      thumbnailUrl: '',
+      sourceUrl: '',
+    );
+
+    testWidgets('tocar reproduce y descargar queda en el menú', (tester) async {
+      var played = 0;
+      var downloaded = 0;
+      await tester.pumpWidget(_host(ExploreTrackCard(
+        track: track,
+        onDownload: () => downloaded++,
+        onPlay: () => played++,
+        isLoadingStream: false,
+      )));
+
+      await tester.tap(find.byKey(const Key('explore_track_aaaaaaaaaaa')));
+      expect(played, 1);
+      expect(downloaded, 0);
+
+      await tester.tap(find.byKey(const Key('explore_track_more_aaaaaaaaaaa')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('card_download_aaaaaaaaaaa')));
+      await tester.pumpAndSettle();
+      expect(downloaded, 1);
+      expect(played, 1);
+    });
+
+    testWidgets('sin onPlay (escritorio) tocar descarga; cargando bloquea el toque', (tester) async {
+      var downloaded = 0;
+      await tester.pumpWidget(_host(ExploreTrackCard(
+        track: track,
+        onDownload: () => downloaded++,
+        onPlay: null,
+        isLoadingStream: false,
+      )));
+      await tester.tap(find.byKey(const Key('explore_track_aaaaaaaaaaa')));
+      expect(downloaded, 1);
+
+      await tester.pumpWidget(_host(ExploreTrackCard(
+        track: track,
+        onDownload: () => downloaded++,
+        onPlay: () {},
+        isLoadingStream: true,
+      )));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      await tester.tap(find.byKey(const Key('explore_track_aaaaaaaaaaa')));
+      expect(downloaded, 1);
+    });
   });
 }

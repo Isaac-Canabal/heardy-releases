@@ -106,3 +106,26 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# yt-dlp.exe para "Escuchar" en Windows (streaming resuelto en el cliente).
+# Se descarga fijado por versión y verificado por SHA-256 (no se versiona el
+# binario); la app lo busca en <exe>/yt-dlp/yt-dlp.exe y lo mantiene al día.
+set(YTDLP_VERSION "2026.08.19")
+set(YTDLP_SHA256 "66674953fe251b89f4d08c5f0e35e0728679bd67ab3d7d05c0562af101dd3e7a")
+set(YTDLP_LOCAL "${CMAKE_BINARY_DIR}/yt-dlp/yt-dlp.exe")
+if(NOT EXISTS "${YTDLP_LOCAL}")
+  file(DOWNLOAD
+    "https://github.com/yt-dlp/yt-dlp/releases/download/${YTDLP_VERSION}/yt-dlp.exe"
+    "${YTDLP_LOCAL}"
+    EXPECTED_HASH SHA256=${YTDLP_SHA256}
+    STATUS YTDLP_DL_STATUS)
+  list(GET YTDLP_DL_STATUS 0 YTDLP_DL_CODE)
+  if(NOT YTDLP_DL_CODE EQUAL 0)
+    file(REMOVE "${YTDLP_LOCAL}")
+    message(WARNING "No se pudo descargar yt-dlp.exe: Escuchar quedara desactivado en Windows")
+  endif()
+endif()
+if(EXISTS "${YTDLP_LOCAL}")
+  install(FILES "${YTDLP_LOCAL}" DESTINATION "${CMAKE_INSTALL_PREFIX}/yt-dlp"
+    COMPONENT Runtime)
+endif()

@@ -1,7 +1,12 @@
+import 'dart:async';
+
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:heardy/models/explore.dart';
+import 'package:heardy/models/song.dart';
 import 'package:heardy/services/download_source.dart';
 import 'package:heardy/services/explore_logic.dart';
+import 'package:heardy/services/stream_resolver.dart';
 
 RemoteTrack _t(String id, {String title = 't'}) => RemoteTrack(
       id: id,
@@ -184,4 +189,93 @@ void main() {
       expect(parseExploreSearch(ExploreSearchKind.albums, {'albums': []}).isEmpty, isTrue);
     });
   });
+
+  group('exploreNeedsRefresh', () {
+    final now = DateTime(2026, 10, 9, 12);
+
+    test('nunca refrescado: toca', () => expect(exploreNeedsRefresh(null, now), isTrue));
+
+    test('reciente: no toca; en el límite o pasado: toca', () {
+      expect(exploreNeedsRefresh(now.subtract(const Duration(minutes: 14)), now), isFalse);
+      expect(exploreNeedsRefresh(now.subtract(const Duration(minutes: 15)), now), isTrue);
+      expect(exploreNeedsRefresh(now.subtract(const Duration(hours: 6)), now), isTrue);
+    });
+
+    test('un reloj que retrocedió cuenta como vencido', () {
+      expect(exploreNeedsRefresh(now.add(const Duration(minutes: 5)), now), isTrue);
+    });
+  });
+
+  group('pickLocalSongForVideo', () {
+    Song song(String id, String? url, {bool missing = false}) => Song(
+          id: id,
+          title: id,
+          artist: 'a',
+          duration: 1,
+          filePath: '',
+          artPath: '',
+          format: 'm4a',
+          downloadDate: DateTime(2026),
+          sourceUrl: url,
+          missing: missing,
+        );
+
+    test('empareja por id de vídeo aunque cambie la forma de la URL', () {
+      final s = song('s1', 'https://music.youtube.com/watch?v=$_a&list=x');
+      expect(pickLocalSongForVideo(_a, [song('s0', null), s])?.id, 's1');
+      expect(pickLocalSongForVideo(_a, [song('s2', 'https://youtu.be/$_a')])?.id, 's2');
+    });
+
+    test('ignora las que faltan en disco, las de otro vídeo y los ids vacíos', () {
+      expect(pickLocalSongForVideo(_a, [song('s1', 'https://www.youtube.com/watch?v=$_a', missing: true)]), isNull);
+      expect(pickLocalSongForVideo(_a, [song('s1', 'https://www.youtube.com/watch?v=$_b')]), isNull);
+      expect(pickLocalSongForVideo('', [song('s1', null)]), isNull);
+    });
+  });
+
+  group('TimeoutStreamResolver', () {
+    test('una resolución colgada falla por tiempo en vez de quedar pendiente', () async {
+      final resolver = TimeoutStreamResolver(_HangingResolver(), timeout: const Duration(milliseconds: 20));
+      await expectLater(resolver.resolve(_a), throwsA(isA<TimeoutException>()));
+    });
+  });
+
+  group('Añadir desde Reproduciendo', () {
+    MediaItem stream({String? videoId = _a}) => MediaItem(
+          id: 'stream:$_a',
+          title: 'T',
+          artist: 'Art',
+          duration: const Duration(seconds: 90),
+          artUri: Uri.parse('https://i.ytimg.com/x.jpg'),
+          extras: {'isStream': true, if (videoId != null) 'videoId': videoId},
+        );
+
+    test('una pista en streaming se reconstruye como RemoteTrack', () {
+      final t = remoteTrackFromStreamItem(stream())!;
+      expect(t.id, _a);
+      expect(t.title, 'T');
+      expect(t.artist, 'Art');
+      expect(t.durationSeconds, 90);
+      expect(t.thumbnailUrl, 'https://i.ytimg.com/x.jpg');
+      expect(t.sourceUrl, 'https://www.youtube.com/watch?v=$_a');
+    });
+
+    test('sin videoId o sin isStream no hay RemoteTrack', () {
+      expect(remoteTrackFromStreamItem(stream(videoId: null)), isNull);
+      expect(remoteTrackFromStreamItem(stream(videoId: '')), isNull);
+      expect(remoteTrackFromStreamItem(const MediaItem(id: 'x', title: 't')), isNull);
+    });
+
+    test('la acción depende de si es streaming o local', () {
+      expect(nowPlayingAddAction(stream()), NowPlayingAddAction.downloadStream);
+      expect(nowPlayingAddAction(stream(videoId: null)), NowPlayingAddAction.none);
+      expect(nowPlayingAddAction(const MediaItem(id: 'song1', title: 't')), NowPlayingAddAction.addLocal);
+      expect(nowPlayingAddAction(const MediaItem(id: '', title: 't')), NowPlayingAddAction.none);
+    });
+  });
+}
+
+class _HangingResolver implements StreamResolver {
+  @override
+  Future<StreamInfo> resolve(String videoId) => Completer<StreamInfo>().future;
 }

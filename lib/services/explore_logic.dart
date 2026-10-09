@@ -1,8 +1,14 @@
 /// Lógica pura de Explorar (semillas, mezcla, miniaturas), sin red ni widgets.
 library;
 
+import 'dart:async';
+
+import 'package:audio_service/audio_service.dart';
+
 import '../models/explore.dart';
+import '../models/song.dart';
 import 'download_source.dart';
+import 'stream_resolver.dart';
 
 final _videoIdPattern = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
@@ -121,3 +127,71 @@ ExploreSearchKind? exploreKindFor(SearchKind kind) => switch (kind) {
 
 /// Una respuesta solo vale si no la superó una búsqueda más nueva (el último gana).
 bool isCurrentSearch(int responseGeneration, int latestGeneration) => responseGeneration == latestGeneration;
+
+/// Cuánto vale lo ya cargado de las estanterías de red antes de volver a pedirlo
+/// al entrar o volver a la app.
+const Duration kExploreMaxAge = Duration(minutes: 15);
+
+/// Si toca refrescar las estanterías de red: nunca se refrescaron, o lo hicieron
+/// hace [maxAge] o más. Un reloj que retrocedió cuenta como vencido.
+bool exploreNeedsRefresh(DateTime? lastRefresh, DateTime now, {Duration maxAge = kExploreMaxAge}) {
+  if (lastRefresh == null) return true;
+  final age = now.difference(lastRefresh);
+  return age.isNegative || age >= maxAge;
+}
+
+/// Tope para resolver la URL de audio de una pista. Pasado esto la resolución se
+/// da por fallida: sin tope, una WebView o una red colgadas dejaban la tarjeta
+/// en "cargando" para siempre y bloqueaban cualquier otra reproducción.
+const Duration kStreamResolveTimeout = Duration(seconds: 30);
+
+/// Decora un [StreamResolver] con un tope de tiempo ([TimeoutException] al
+/// vencer). Cubre a la vez el "Escuchar" suelto, la cola y la pre-resolución.
+class TimeoutStreamResolver implements StreamResolver {
+  final StreamResolver _inner;
+  final Duration timeout;
+
+  TimeoutStreamResolver(this._inner, {this.timeout = kStreamResolveTimeout});
+
+  @override
+  Future<StreamInfo> resolve(String videoId) => _inner.resolve(videoId).timeout(timeout);
+}
+
+/// La canción local que corresponde a [videoId] (por `sourceUrl`), ignorando las
+/// que faltan en disco; null si no hay ninguna.
+Song? pickLocalSongForVideo(String videoId, Iterable<Song> candidates) {
+  if (videoId.isEmpty) return null;
+  for (final s in candidates) {
+    if (s.missing) continue;
+    if (youtubeVideoId(s.sourceUrl) == videoId) return s;
+  }
+  return null;
+}
+
+/// La pista remota detrás de un [MediaItem] en streaming (para añadirla/descargarla
+/// desde Reproduciendo), o null si no es de streaming o le falta el id de vídeo.
+RemoteTrack? remoteTrackFromStreamItem(MediaItem item) {
+  if (item.extras?['isStream'] != true) return null;
+  final id = item.extras?['videoId'];
+  if (id is! String || id.isEmpty) return null;
+  return RemoteTrack(
+    id: id,
+    title: item.title,
+    artist: item.artist ?? '',
+    album: item.album,
+    durationSeconds: item.duration?.inSeconds ?? 0,
+    thumbnailUrl: item.artUri?.toString() ?? '',
+    sourceUrl: 'https://www.youtube.com/watch?v=$id',
+  );
+}
+
+/// Qué hace "Añadir" en Reproduciendo con [item]: descargar a una playlist
+/// (streaming), copiar una canción de la biblioteca, o nada si no hay qué añadir.
+enum NowPlayingAddAction { downloadStream, addLocal, none }
+
+NowPlayingAddAction nowPlayingAddAction(MediaItem item) {
+  if (item.extras?['isStream'] == true) {
+    return remoteTrackFromStreamItem(item) != null ? NowPlayingAddAction.downloadStream : NowPlayingAddAction.none;
+  }
+  return item.id.isEmpty ? NowPlayingAddAction.none : NowPlayingAddAction.addLocal;
+}

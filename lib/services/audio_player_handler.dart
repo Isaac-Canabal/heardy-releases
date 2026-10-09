@@ -1014,15 +1014,20 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         AudioSource.uri(Uri.parse(info.url), headers: info.httpHeaders, tag: item),
       ]);
 
-      await _player.setAudioSource(
-        _playlistSource!,
-        initialIndex: 0,
-        initialPosition: Duration.zero,
-      );
+      await _player
+          .setAudioSource(
+            _playlistSource!,
+            initialIndex: 0,
+            initialPosition: Duration.zero,
+          )
+          .timeout(const Duration(seconds: 45));
 
       mediaItem.add(item);
       _streamReady = true;
-      await _player.play();
+      // play() de just_audio no vuelve hasta que la pista termina o se pausa:
+      // esperarlo dejaba a quien llamó (y su "cargando") bloqueado toda la
+      // canción. Los errores de reproducción llegan por el stream de errores.
+      _player.play().catchError((Object _) {});
     } catch (e) {
       // Sólo el tipo: el texto de un error de carga puede citar la URL firmada.
       appLog('Error reproduciendo el stream de ${track.id} (${e.runtimeType})');

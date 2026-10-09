@@ -158,6 +158,9 @@ jobs:
           flutter gen-l10n
       - name: Build Windows
         shell: pwsh
+        env:
+          # firebase_cpp_sdk declares cmake_minimum_required < 3.5, which CMake 4 on the runner rejects.
+          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: |
           flutter build windows --release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

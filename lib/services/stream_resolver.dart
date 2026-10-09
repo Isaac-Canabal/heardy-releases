@@ -37,9 +37,25 @@ class DeviceStreamResolver implements StreamResolver {
 
 StreamResolver defaultStreamResolver() => DeviceStreamResolver();
 
-/// "Escuchar" sólo existe en Android: la URL directa va atada a la IP que la
-/// resuelve, y sólo el plugin del dispositivo resuelve desde la IP que reproduce.
-bool get streamingSupported => Platform.isAndroid;
+/// Ruta del yt-dlp.exe utilizable en Windows; la fija el arranque
+/// ([configureWindowsStreaming]) y null significa que no hay binario.
+String? _windowsYtdlpPath;
+
+void configureWindowsStreaming(String? ytdlpPath) => _windowsYtdlpPath = ytdlpPath;
+
+String? get windowsYtdlpPath => _windowsYtdlpPath;
+
+/// Pura, para tests: Android siempre; Windows sólo si el binario existe.
+bool streamingSupportedFor({required bool android, required bool windows, required bool binaryAvailable}) =>
+    android || (windows && binaryAvailable);
+
+/// "Escuchar": la URL directa va atada a la IP que la resuelve, así que se
+/// resuelve en el propio equipo (plugin en Android, yt-dlp.exe en Windows).
+bool get streamingSupported => streamingSupportedFor(
+      android: Platform.isAndroid,
+      windows: Platform.isWindows,
+      binaryAvailable: _windowsYtdlpPath != null,
+    );
 
 /// Si tras fallar "Escuchar" tiene sentido ofrecer descargar: no cuando el
 /// vídeo no existe o no tiene audio AAC, porque la descarga fallaría igual.

@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/download_provider.dart';
+import '../providers/explore_provider.dart';
+import '../providers/music_provider.dart';
 import '../services/audio_player_handler.dart';
 import '../services/download_source.dart';
 import '../services/friendly_error.dart';
@@ -63,32 +65,37 @@ mixin RemoteTrackActionsMixin<T extends StatefulWidget> on State<T> {
     );
   }
 
-  Future<void> downloadRemoteTrack(RemoteTrack track) async {
-    final choice = await pickTargetPlaylist(context);
-    if (choice == null || !mounted) return;
-    final playlistId = await resolveTargetPlaylistId(context, choice);
-    if (playlistId == null || !mounted) return;
+  Future<void> downloadRemoteTrack(RemoteTrack track) =>
+      enqueueRemoteTrackDownload(context, track, isMounted: () => mounted);
 
-    final provider = context.read<DownloadProvider>();
-    final added = await provider.enqueueTrack(
-      track,
-      playlistId: playlistId,
-      // Viene de /search o de Explorar (listados aplanados): `artist` puede ser
-      // el canal, no el artista real. metadataComplete=false hace que el worker
-      // pida /resolve antes de bajar nada (DD6).
-      metadataComplete: false,
-    );
-    if (!mounted) return;
-    provider.processQueue();
+  bool _startingPlay = false;
 
-    final l10n = AppLocalizations.of(context)!;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(added ? l10n.searchAddedToQueueSnack(track.title) : l10n.searchAlreadyQueuedSnack),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+  /// Acción por defecto al tocar una pista: si ya está en la biblioteca suena el
+  /// archivo local; si no, streaming ([queue] = cola continua desde [track]).
+  /// Sin streaming (escritorio) descarga.
+  Future<void> playRemoteTrack(RemoteTrack track, {List<RemoteTrack>? queue}) async {
+    if (!streamingSupported) return downloadRemoteTrack(track);
+    if (_startingPlay || streamingTrackId != null) return;
+    _startingPlay = true;
+    try {
+      final local = await context.read<ExploreProvider>().findLocalSong(track.id);
+      if (!mounted) return;
+      if (local != null) {
+        final shell = DesktopShellScope.maybeOf(context);
+        final handler = context.read<AudioPlayerHandler>();
+        final label = AppLocalizations.of(context)!.exploreRecentTitle;
+        shell?.openNowPlaying();
+        await context.read<MusicProvider>().playSearchResults([local], local, handler, label);
+        return;
+      }
+      if (queue != null) {
+        await listenRemoteQueue(queue, track);
+      } else {
+        await listenRemoteTrack(track);
+      }
+    } finally {
+      _startingPlay = false;
+    }
   }
 
   Future<void> listenRemoteTrack(RemoteTrack track) async {
@@ -158,4 +165,42 @@ mixin RemoteTrackActionsMixin<T extends StatefulWidget> on State<T> {
       if (mounted) setState(() => streamingTrackId = null);
     }
   }
+}
+
+/// Elige playlist y encola la descarga de [track]; compartido por las pantallas
+/// con el mixin y por Reproduciendo. [isMounted] protege los `await`.
+Future<void> enqueueRemoteTrackDownload(
+  BuildContext context,
+  RemoteTrack track, {
+  required bool Function() isMounted,
+}) async {
+  final choice = await pickTargetPlaylist(context);
+  if (choice == null || !isMounted()) return;
+  // ignore: use_build_context_synchronously
+  final playlistId = await resolveTargetPlaylistId(context, choice);
+  if (playlistId == null || !isMounted()) return;
+
+  // ignore: use_build_context_synchronously
+  final provider = context.read<DownloadProvider>();
+  final added = await provider.enqueueTrack(
+    track,
+    playlistId: playlistId,
+    // Viene de /search o de Explorar (listados aplanados): `artist` puede ser
+    // el canal, no el artista real. metadataComplete=false hace que el worker
+    // pida /resolve antes de bajar nada (DD6).
+    metadataComplete: false,
+  );
+  if (!isMounted()) return;
+  provider.processQueue();
+
+  // ignore: use_build_context_synchronously
+  final l10n = AppLocalizations.of(context)!;
+  // ignore: use_build_context_synchronously
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(added ? l10n.searchAddedToQueueSnack(track.title) : l10n.searchAlreadyQueuedSnack),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 3),
+    ),
+  );
 }

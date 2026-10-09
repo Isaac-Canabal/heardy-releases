@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:flutter/material.dart';
@@ -21,10 +22,12 @@ import 'services/audio_player_handler.dart';
 import 'services/cloud_source.dart';
 import 'services/download_service.dart';
 import 'services/download_source.dart';
+import 'services/explore_logic.dart';
 import 'services/heardy_cloud_source.dart';
 import 'services/official_server.dart';
 import 'services/server_pool.dart';
 import 'services/stream_resolver.dart';
+import 'services/ytdlp_local_stream_resolver.dart';
 import 'services/ytdlp_server_source.dart';
 import 'services/system_notifications.dart';
 import 'providers/auth_provider.dart';
@@ -298,13 +301,23 @@ void main() async {
   );
   final audioEffectsService = AudioEffectsService(audioHandler);
 
+  final StreamResolver streamResolver;
+  if (Platform.isWindows) {
+    final ytdlpPath = await prepareWindowsYtdlp();
+    configureWindowsStreaming(ytdlpPath);
+    if (ytdlpPath != null) unawaited(maybeUpdateYtdlp(ytdlpPath));
+    streamResolver = WindowsYtdlpStreamResolver(ytdlpPath ?? '');
+  } else {
+    streamResolver = defaultStreamResolver();
+  }
+
   runApp(
     MultiProvider(
       providers: [
         Provider<AudioPlayerHandler>.value(value: audioHandler),
         Provider<ServerPool>.value(value: serverPool),
         Provider<DownloadSource>.value(value: downloadSource),
-        Provider<StreamResolver>.value(value: defaultStreamResolver()),
+        Provider<StreamResolver>.value(value: TimeoutStreamResolver(streamResolver)),
         Provider<CloudSource>.value(value: cloudSource),
         ChangeNotifierProvider.value(value: authProvider),
         ChangeNotifierProvider.value(value: settingsProvider),

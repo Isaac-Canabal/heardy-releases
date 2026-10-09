@@ -6,11 +6,13 @@ import '../services/remote_track_actions.dart';
 import '../theme/app_theme.dart';
 
 /// Fila de una pista remota: tocar la fila descarga; el botón de play escucha
-/// (sólo si [onListen] no es null).
+/// (sólo si [onListen] no es null). Con [onPlay] tocar la fila REPRODUCE y el
+/// icono de descarga pasa a ser un botón.
 class RemoteTrackTile extends StatelessWidget {
   final RemoteTrack track;
   final VoidCallback onDownload;
   final VoidCallback? onListen;
+  final VoidCallback? onPlay;
   final bool isLoadingStream;
 
   /// Ya está en la biblioteca: se cambia el icono de descarga por una marca.
@@ -22,6 +24,7 @@ class RemoteTrackTile extends StatelessWidget {
     required this.onDownload,
     required this.onListen,
     required this.isLoadingStream,
+    this.onPlay,
     this.downloaded = false,
   });
 
@@ -34,7 +37,7 @@ class RemoteTrackTile extends StatelessWidget {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(18),
-          onTap: onDownload,
+          onTap: isLoadingStream && onPlay != null ? null : (onPlay ?? onDownload),
           child: Padding(
             padding: const EdgeInsets.all(10),
             child: Row(
@@ -80,7 +83,12 @@ class RemoteTrackTile extends StatelessWidget {
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.35), fontSize: 12),
                     ),
                   ),
-                if (onListen == null)
+                if (onPlay != null && isLoadingStream)
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                else if (onPlay != null || onListen == null)
                   const SizedBox.shrink()
                 else if (isLoadingStream)
                   const Padding(
@@ -107,6 +115,13 @@ class RemoteTrackTile extends StatelessWidget {
                       color: Colors.white.withValues(alpha: 0.5),
                       size: 22,
                     ),
+                  )
+                else if (onPlay != null)
+                  IconButton(
+                    key: Key('download_track_button_${track.id}'),
+                    tooltip: AppLocalizations.of(context)!.searchListenDownloadAction,
+                    icon: Icon(Icons.download_rounded, color: AppTheme.primaryLight, size: 22),
+                    onPressed: onDownload,
                   )
                 else
                   Icon(Icons.download_rounded, color: AppTheme.primaryLight, size: 22),

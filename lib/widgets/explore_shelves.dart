@@ -6,6 +6,7 @@ import '../l10n/app_localizations.dart';
 import '../models/explore.dart';
 import '../models/song.dart';
 import '../providers/explore_provider.dart';
+import '../services/download_source.dart';
 import '../theme/app_theme.dart';
 import 'skeleton_box.dart';
 
@@ -264,6 +265,137 @@ class ExploreAlbumsRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Tarjeta de una pista remota en una estantería: tocar REPRODUCE ([onPlay]);
+/// descargar queda en el menú (mantener pulsado o el botón de más opciones).
+/// Sin [onPlay] (escritorio, no hay streaming) tocar descarga.
+class ExploreTrackCard extends StatelessWidget {
+  static const double size = 140;
+
+  final RemoteTrack track;
+  final VoidCallback onDownload;
+  final VoidCallback? onPlay;
+  final bool isLoadingStream;
+
+  const ExploreTrackCard({
+    super.key,
+    required this.track,
+    required this.onDownload,
+    required this.onPlay,
+    required this.isLoadingStream,
+  });
+
+  void _openMenu(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    showModalBottomSheet<void>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (onPlay != null)
+              ListTile(
+                key: Key('card_listen_${track.id}'),
+                leading: Icon(Icons.play_arrow_rounded, color: AppTheme.primaryLight),
+                title: Text(l10n.searchListenTooltip),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onPlay!();
+                },
+              ),
+            ListTile(
+              key: Key('card_download_${track.id}'),
+              leading: Icon(Icons.download_rounded, color: AppTheme.primaryLight),
+              title: Text(l10n.searchListenDownloadAction),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onDownload();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final play = onPlay;
+    return SizedBox(
+      width: size,
+      child: InkWell(
+        key: Key('explore_track_${track.id}'),
+        borderRadius: BorderRadius.circular(12),
+        onTap: isLoadingStream ? null : (play ?? onDownload),
+        onLongPress: isLoadingStream ? null : () => _openMenu(context),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: size,
+                height: size,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    track.thumbnailUrl.isEmpty
+                        ? _placeholder()
+                        : Image.network(
+                            track.thumbnailUrl,
+                            fit: BoxFit.cover,
+                            cacheWidth: (size * 2).round(),
+                            errorBuilder: (_, __, ___) => _placeholder(),
+                          ),
+                    if (isLoadingStream)
+                      const ColoredBox(
+                        color: Colors.black45,
+                        child: Center(
+                          child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                        ),
+                      )
+                    else
+                      Positioned(
+                        right: 2,
+                        bottom: 2,
+                        child: IconButton(
+                          key: Key('explore_track_more_${track.id}'),
+                          tooltip: AppLocalizations.of(context)!.exploreTrackMoreTooltip,
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.more_vert_rounded, color: Colors.white, size: 20),
+                          style: IconButton.styleFrom(backgroundColor: Colors.black45),
+                          onPressed: () => _openMenu(context),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              track.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              track.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _placeholder() => Container(
+        decoration: BoxDecoration(gradient: AppTheme.gradientForTitle(track.title)),
+        child: const Icon(Icons.music_note_rounded, color: Colors.white70),
+      );
 }
 
 /// Esqueleto de una fila de tarjetas cuadradas (o circulares).

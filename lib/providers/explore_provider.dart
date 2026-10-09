@@ -45,16 +45,32 @@ class ExploreProvider extends ChangeNotifier {
   };
   final Map<ExploreShelfId, int> _generation = {for (final id in ExploreShelfId.values) id: 0};
   bool _disposed = false;
+  DateTime? _lastNetworkRefresh;
+  final DateTime Function() _now;
+  final Future<List<Song>> Function(String videoId) _localSongsForVideo;
 
   ExploreProvider({
     required DownloadSource source,
     DatabaseHelper? db,
     String? Function()? country,
     Future<List<Map<String, dynamic>>> Function()? topArtistRows,
+    DateTime Function()? now,
+    Future<List<Song>> Function(String videoId)? localSongsForVideo,
   })  : _source = source,
         _db = db ?? DatabaseHelper.instance,
         _country = country ?? deviceExploreCountry,
-        _topArtistRows = topArtistRows ?? (db ?? DatabaseHelper.instance).getTopArtistsThisMonth;
+        _topArtistRows = topArtistRows ?? (db ?? DatabaseHelper.instance).getTopArtistsThisMonth,
+        _now = now ?? DateTime.now,
+        _localSongsForVideo = localSongsForVideo ??
+            ((videoId) async {
+              final database = await (db ?? DatabaseHelper.instance).database;
+              final rows = await database.query(
+                'songs',
+                where: "missing = 0 AND sourceUrl LIKE ? ESCAPE '\\'",
+                whereArgs: ['%${videoId.replaceAll('_', r'\_')}%'],
+              );
+              return [for (final r in rows) Song.fromMap(r)];
+            });
 
   ShelfState<List<Song>> get recent => _typed(ExploreShelfId.recent);
   ShelfState<List<String>> get artists => _typed(ExploreShelfId.artists);
@@ -78,16 +94,48 @@ class ExploreProvider extends ChangeNotifier {
   /// Pide las estanterías de red que aún no se han pedido. Las que fallaron se
   /// reintentan sólo con [reloadShelf] o [refresh], para no martillar al
   /// servidor cada vez que se cambia de pestaña.
-  Future<void> loadNetwork() => Future.wait([
-        for (final id in _networkShelves)
-          if (_states[id]!.isIdle) reloadShelf(id),
-      ]);
+  Future<void> loadNetwork() async {
+    final pending = [
+      for (final id in _networkShelves)
+        if (_states[id]!.isIdle) id,
+    ];
+    await Future.wait([for (final id in pending) reloadShelf(id)]);
+    if (pending.length == _networkShelves.length) _stampIfHealthy();
+  }
 
   Future<void> refresh() async {
     await Future.wait([
       loadLocal(),
       for (final id in _networkShelves) reloadShelf(id),
     ]);
+    _stampIfHealthy();
+  }
+
+  /// Al entrar o volver a la app: si lo cargado tiene [kExploreMaxAge] o más
+  /// (o nunca se cargó) lo vuelve a pedir conservando lo visible mientras tanto;
+  /// si sigue fresco, sólo completa lo que falte.
+  Future<void> refreshIfStale() async {
+    if (exploreNeedsRefresh(_lastNetworkRefresh, _now())) return refresh();
+    await loadLocal();
+    await loadNetwork();
+  }
+
+  /// Sólo se da por fresco si ninguna estantería de red quedó en error: una
+  /// que falló se reintenta en la siguiente entrada, no tras 15 minutos.
+  void _stampIfHealthy() {
+    if (_networkShelves.any((id) => _states[id]!.status == ShelfStatus.error)) return;
+    _lastNetworkRefresh = _now();
+  }
+
+  /// La canción ya descargada que corresponde a [videoId], o null. Falla en
+  /// silencio (null): el llamador cae a reproducir por streaming.
+  Future<Song?> findLocalSong(String videoId) async {
+    try {
+      return pickLocalSongForVideo(videoId, await _localSongsForVideo(videoId));
+    } catch (e) {
+      print('Explorar: no se pudo buscar la canción local (${e.runtimeType})');
+      return null;
+    }
   }
 
   static const _networkShelves = [

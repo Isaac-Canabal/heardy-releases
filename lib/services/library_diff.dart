@@ -9,6 +9,44 @@
 /// "(Official Video)" de más.
 library;
 
+import 'cover_art.dart' show youtubeVideoIdFrom;
+
+/// Enlaces de origen que este equipo ya tiene: los `sourceUrl` locales más los
+/// de las filas de la nube cuyo audio ya está acá por hash (el escáner no
+/// guarda `sourceUrl`, así que una canción presente puede no tener ninguno).
+Set<String> knownLocalSourceUrls({
+  required Set<String> localSourceUrls,
+  required List<Map<String, dynamic>> cloudSongs,
+  required Set<String> localFileHashes,
+}) {
+  final urls = <String>{};
+  void add(String url) {
+    urls.add(url);
+    final id = youtubeVideoIdFrom(url);
+    if (id != null) urls.add('yt:$id');
+  }
+
+  localSourceUrls.forEach(add);
+  for (final song in cloudSongs) {
+    final hash = song['fileHash'] as String?;
+    final url = song['sourceUrl'] as String?;
+    if (hash != null && localFileHashes.contains(hash) && url != null && url.isNotEmpty) {
+      add(url);
+    }
+  }
+  return urls;
+}
+
+/// `true` si [url] ya está entre [knownUrls] (de [knownLocalSourceUrls]),
+/// comparando por id de vídeo cuando es de YouTube (`youtu.be/x`, `watch?v=x`
+/// y `music.youtube.com` son el mismo vídeo) y literalmente si no.
+bool sourceUrlAlreadyKnown(String url, Set<String> knownUrls) {
+  if (url.isEmpty) return false;
+  if (knownUrls.contains(url)) return true;
+  final id = youtubeVideoIdFrom(url);
+  return id != null && knownUrls.contains('yt:$id');
+}
+
 /// Cuántas canciones DISTINTAS hay en [cloudSongs], contando por `fileHash`
 /// en vez de por fila. El índice de la nube puede tener más de una fila para
 /// el mismo audio (una heredada de antes de que el id fuera el hash, y la
@@ -37,13 +75,131 @@ List<Map<String, dynamic>> missingCloudSongs(
   List<Map<String, dynamic>> cloudSongs,
   Set<String> localFileHashes,
 ) {
+  final seen = <String>{};
   return cloudSongs.where((song) {
     final hash = song['fileHash'] as String?;
     // Sin hash no hay forma de emparejar — nunca se asume "falta" ni
     // "está" sobre un dato que no está.
     if (hash == null || hash.isEmpty) return false;
-    return !localFileHashes.contains(hash);
+    // Un mismo audio con dos filas en la nube falta una sola vez.
+    return !localFileHashes.contains(hash) && seen.add(hash);
   }).toList();
+}
+
+/// Clave natural de una playlist: el nombre sin mayúsculas ni espacios de más
+/// (misma regla que `MusicProvider.createPlaylist`, que ya la trata como
+/// duplicada).
+String playlistNameKey(String? name) => (name ?? '').trim().toLowerCase();
+
+/// Índice de la nube sin filas repetidas: una por `fileHash` y una por nombre
+/// de playlist, con las pertenencias reescritas a esos ids.
+class CanonicalCloudIndex {
+  final List<Map<String, dynamic>> songs;
+  final List<Map<String, dynamic>> playlists;
+  final List<Map<String, dynamic>> playlistSongs;
+  const CanonicalCloudIndex(this.songs, this.playlists, this.playlistSongs);
+}
+
+/// Colapsa los duplicados que la nube acumula por ser aditiva: la misma
+/// canción con dos ids (fila heredada + id nuevo) y la misma playlist con dos
+/// ids (borrada y vuelta a crear con el mismo nombre). Sin esto la
+/// restauración cuenta, empareja y encola cada copia por separado y recrea
+/// la playlist dos veces. Gana la primera fila; sólo se rellenan `sourceUrl`
+/// y `originalUrl` vacíos con los de las copias.
+CanonicalCloudIndex canonicalizeCloudIndex(
+  List<Map<String, dynamic>> songs,
+  List<Map<String, dynamic>> playlists,
+  List<Map<String, dynamic>> playlistSongs,
+) {
+  final songRemap = <String, String>{};
+  final songByHash = <String, Map<String, dynamic>>{};
+  final outSongs = <Map<String, dynamic>>[];
+  for (final song in songs) {
+    final id = song['songId'] as String?;
+    final hash = song['fileHash'] as String?;
+    if (hash != null && hash.isNotEmpty) {
+      final first = songByHash[hash];
+      if (first != null) {
+        if (id != null) songRemap[id] = first['songId'] as String;
+        if ((first['sourceUrl'] as String?)?.isNotEmpty != true &&
+            (song['sourceUrl'] as String?)?.isNotEmpty == true) {
+          first['sourceUrl'] = song['sourceUrl'];
+        }
+        continue;
+      }
+      final copy = Map<String, dynamic>.from(song);
+      songByHash[hash] = copy;
+      outSongs.add(copy);
+    } else {
+      outSongs.add(Map<String, dynamic>.from(song));
+    }
+  }
+
+  final playlistRemap = <String, String>{};
+  final playlistByName = <String, Map<String, dynamic>>{};
+  final outPlaylists = <Map<String, dynamic>>[];
+  for (final playlist in playlists) {
+    final id = playlist['playlistId'] as String?;
+    final key = playlistNameKey(playlist['name'] as String?);
+    if (key.isNotEmpty) {
+      final first = playlistByName[key];
+      if (first != null) {
+        if (id != null) playlistRemap[id] = first['playlistId'] as String;
+        if ((first['originalUrl'] as String?)?.isNotEmpty != true &&
+            (playlist['originalUrl'] as String?)?.isNotEmpty == true) {
+          first['originalUrl'] = playlist['originalUrl'];
+        }
+        continue;
+      }
+      final copy = Map<String, dynamic>.from(playlist);
+      playlistByName[key] = copy;
+      outPlaylists.add(copy);
+    } else {
+      outPlaylists.add(Map<String, dynamic>.from(playlist));
+    }
+  }
+
+  final pairs = <String>{};
+  final outPlaylistSongs = <Map<String, dynamic>>[];
+  for (final row in playlistSongs) {
+    final rawPlaylist = row['playlistId'] as String?;
+    final rawSong = row['songId'] as String?;
+    if (rawPlaylist == null || rawSong == null) continue;
+    final playlistId = playlistRemap[rawPlaylist] ?? rawPlaylist;
+    final songId = songRemap[rawSong] ?? rawSong;
+    if (!pairs.add('$playlistId $songId')) continue;
+    outPlaylistSongs.add({...row, 'playlistId': playlistId, 'songId': songId});
+  }
+  return CanonicalCloudIndex(outSongs, outPlaylists, outPlaylistSongs);
+}
+
+/// A qué playlist local corresponde cada playlist de la nube: el mismo id, o
+/// si no, la local con el mismo nombre. Una playlist borrada y restaurada, o
+/// creada por el escáner desde su carpeta, tiene otro id pero es la misma —
+/// recrearla con el id de la nube la dejaba duplicada. Las que no tienen
+/// equivalente local no aparecen en el resultado.
+Map<String, String> localPlaylistIdByCloudId(
+  List<Map<String, dynamic>> cloudPlaylists,
+  Iterable<({String id, String name})> localPlaylists,
+) {
+  final localIds = {for (final p in localPlaylists) p.id};
+  final localIdByName = <String, String>{};
+  for (final p in localPlaylists) {
+    final key = playlistNameKey(p.name);
+    if (key.isNotEmpty) localIdByName.putIfAbsent(key, () => p.id);
+  }
+  final result = <String, String>{};
+  for (final cloud in cloudPlaylists) {
+    final id = cloud['playlistId'] as String?;
+    if (id == null) continue;
+    if (localIds.contains(id)) {
+      result[id] = id;
+      continue;
+    }
+    final byName = localIdByName[playlistNameKey(cloud['name'] as String?)];
+    if (byName != null) result[id] = byName;
+  }
+  return result;
 }
 
 /// Las columnas EXACTAS que acepta cada lista de `PUT /library`. Los modelos
@@ -175,10 +331,24 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     for (final row in playlists)
       if (row['playlistId'] is String) row['playlistId'] as String: row,
   };
+  // Misma playlist con otro id (borrada y vuelta a crear, o creada por el
+  // escáner desde su carpeta): gana la local, igual que con las canciones.
+  final localIdByName = <String, String>{};
+  for (final row in playlists) {
+    final key = playlistNameKey(row['name'] as String?);
+    final id = row['playlistId'];
+    if (key.isNotEmpty && id is String) localIdByName.putIfAbsent(key, () => id);
+  }
+  final playlistIdRemap = <String, String>{};
   for (final cloudPlaylist in cloudPlaylists) {
-    final id = cloudPlaylist['playlistId'] as String?;
+    var id = cloudPlaylist['playlistId'] as String?;
     final name = cloudPlaylist['name'] as String?;
     if (id == null || id.isEmpty || name == null || name.isEmpty) continue;
+    final sameNameId = playlistIds.contains(id) ? null : localIdByName[playlistNameKey(name)];
+    if (sameNameId != null) {
+      playlistIdRemap[id] = sameNameId;
+      id = sameNameId;
+    }
     if (!playlistIds.add(id)) {
       // Ya existe acá: igual que con sourceUrl en las canciones, sólo se
       // rellena el hueco si este equipo no tiene originalUrl y la nube sí
@@ -196,6 +366,8 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     }
     playlists.add(_project(cloudPlaylist, _playlistColumns));
     playlistRowById[id] = playlists.last;
+    final key = playlistNameKey(name);
+    if (key.isNotEmpty) localIdByName.putIfAbsent(key, () => id!);
   }
 
   final playlistSongs = [
@@ -205,9 +377,10 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     for (final row in playlistSongs) '${row['playlistId']} ${row['songId']}',
   };
   for (final cloudRow in cloudPlaylistSongs) {
-    final playlistId = cloudRow['playlistId'] as String?;
+    final rawPlaylistId = cloudRow['playlistId'] as String?;
     final rawSongId = cloudRow['songId'] as String?;
-    if (playlistId == null || rawSongId == null) continue;
+    if (rawPlaylistId == null || rawSongId == null) continue;
+    final playlistId = playlistIdRemap[rawPlaylistId] ?? rawPlaylistId;
     final songId = songIdRemap[rawSongId] ?? rawSongId;
     // Una pertenencia sólo se conserva si sus dos extremos están en el
     // resultado: el servidor no tiene claves foráneas acá, así que una fila

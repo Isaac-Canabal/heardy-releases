@@ -87,3 +87,9 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Abrir {#MyAppName}"; Flags: now
 ; uso y sobrevivían en disco. Cerrarla antes de borrar.
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /F"; Flags: runhidden; RunOnceId: "CloseHeardy"
+
+; yt-dlp.exe viaja en {app}\yt-dlp (el install de CMake lo deja en la carpeta
+; Release, así que ya entra en [Files]). La app mantiene una copia actualizable
+; en %LOCALAPPDATA%\Heardy\yt-dlp, porque {app} suele ser de sólo lectura.
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\Heardy\yt-dlp"
