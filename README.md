@@ -14,6 +14,15 @@ Siempre la última versión:
 
 Las releases se construyen automáticamente por GitHub Actions a partir de una etiqueta `vX.Y.Z` (ver `.github/workflows/release.yml`).
 
+## Capturas
+
+<p>
+  <img src="docs/screenshots/movil-reproductor.jpg" alt="Reproduciendo ahora en Android" height="420" />
+  <img src="docs/screenshots/movil-letra.jpg" alt="Letra sincronizada" height="420" />
+  <img src="docs/screenshots/movil-explorar.jpg" alt="Pantalla Explorar" height="420" />
+</p>
+<img src="docs/screenshots/escritorio.png" alt="Heardy en Windows: playlists, reproductor y letra en tres columnas" width="700" />
+
 ## Qué hace
 
 - **Biblioteca local**: una carpeta elegida una vez; escaneo incremental que reconoce archivos movidos o renombrados por el hash del audio; nada se borra solo.
