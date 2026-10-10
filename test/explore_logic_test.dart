@@ -271,6 +271,10 @@ void main() {
       expect(nowPlayingAddAction(stream(videoId: null)), NowPlayingAddAction.none);
       expect(nowPlayingAddAction(const MediaItem(id: 'song1', title: 't')), NowPlayingAddAction.addLocal);
       expect(nowPlayingAddAction(const MediaItem(id: '', title: 't')), NowPlayingAddAction.none);
+      expect(showsPhoneAddButton(stream()), isTrue);
+      expect(showsPhoneAddButton(stream(videoId: null)), isFalse);
+      expect(showsPhoneAddButton(const MediaItem(id: 'song1', title: 't')), isFalse);
+      expect(showsPhoneAddButton(const MediaItem(id: '', title: 't')), isFalse);
     });
   });
 

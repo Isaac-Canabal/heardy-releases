@@ -375,8 +375,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                   audioHandler,
                                 ),
                               ),
-                              if (nowPlayingAddAction(mediaItem) !=
-                                  NowPlayingAddAction.none) ...[
+                              if (showsPhoneAddButton(mediaItem)) ...[
                                 const SizedBox(width: 16),
                                 ElevatedButton.icon(
                                   key: const Key('now_playing_add_button'),
@@ -413,9 +412,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         ),
 
                         // 4. Seek Bar
-                        _WaveformSeekSection(
+                        WaveformSeekSection(
                           mediaItem: mediaItem,
-                          audioHandler: audioHandler,
+                          positionStream: audioHandler.player.positionStream,
+                          onSeek: audioHandler.seek,
                         ),
 
                         // 5. Central Playback Controls
@@ -1868,22 +1868,36 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
   }
 }
 
-/// Seek bar de Reproduciendo: carga la onda en segundo plano (Android, pistas
-/// locales) y mientras tanto, o si falla, queda el Slider.
-class _WaveformSeekSection extends StatefulWidget {
+/// Seek bar con onda: la carga en segundo plano (Android y Windows, pistas
+/// locales) y mientras tanto, o si falla, queda el Slider. Recibe el stream de
+/// posición y el seek en vez del handler para poder probarlo sin audio real.
+class WaveformSeekSection extends StatefulWidget {
   final MediaItem mediaItem;
-  final AudioPlayerHandler audioHandler;
+  final Stream<Duration> positionStream;
+  final ValueChanged<Duration> onSeek;
+  final bool inline;
 
-  const _WaveformSeekSection({
+  /// Escritorio: onda más baja y con menos barras.
+  final bool compact;
+
+  /// Inyectable en tests; por defecto el repositorio de la plataforma.
+  final Future<Uint8List?> Function(String songId, String path)? loadPeaks;
+
+  const WaveformSeekSection({
+    super.key,
     required this.mediaItem,
-    required this.audioHandler,
+    required this.positionStream,
+    required this.onSeek,
+    this.inline = false,
+    this.compact = false,
+    this.loadPeaks,
   });
 
   @override
-  State<_WaveformSeekSection> createState() => _WaveformSeekSectionState();
+  State<WaveformSeekSection> createState() => _WaveformSeekSectionState();
 }
 
-class _WaveformSeekSectionState extends State<_WaveformSeekSection> {
+class _WaveformSeekSectionState extends State<WaveformSeekSection> {
   Uint8List? _peaks;
 
   @override
@@ -1893,7 +1907,7 @@ class _WaveformSeekSectionState extends State<_WaveformSeekSection> {
   }
 
   @override
-  void didUpdateWidget(covariant _WaveformSeekSection old) {
+  void didUpdateWidget(covariant WaveformSeekSection old) {
     super.didUpdateWidget(old);
     if (old.mediaItem.id != widget.mediaItem.id) {
       _peaks = null;
@@ -1905,9 +1919,15 @@ class _WaveformSeekSectionState extends State<_WaveformSeekSection> {
     final item = widget.mediaItem;
     final path = item.extras?['filePath'] as String? ?? '';
     final isStream = item.extras?['isStream'] == true;
-    final repo = defaultWaveformRepository();
-    if (repo == null || isStream || path.isEmpty) return;
-    final peaks = await repo.load(item.id, path);
+    if (isStream || path.isEmpty) return;
+    final loader = widget.loadPeaks ?? defaultWaveformRepository()?.load;
+    if (loader == null) return;
+    Uint8List? peaks;
+    try {
+      peaks = await loader(item.id, path);
+    } catch (_) {
+      return;
+    }
     if (!mounted || widget.mediaItem.id != item.id || peaks == null) return;
     setState(() => _peaks = peaks);
   }
@@ -1915,13 +1935,15 @@ class _WaveformSeekSectionState extends State<_WaveformSeekSection> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Duration>(
-      stream: widget.audioHandler.player.positionStream,
+      stream: widget.positionStream,
       builder: (context, posSnapshot) {
         return SeekBar(
+          inline: widget.inline,
+          compact: widget.compact,
           position: posSnapshot.data ?? Duration.zero,
           duration: widget.mediaItem.duration ?? Duration.zero,
           peaks: _peaks,
-          onChangeEnd: (newPosition) => widget.audioHandler.seek(newPosition),
+          onChangeEnd: widget.onSeek,
         );
       },
     );
@@ -1947,6 +1969,9 @@ class SeekBar extends StatefulWidget {
   /// Onda ya cargada; si es null se muestra el Slider de siempre.
   final Uint8List? peaks;
 
+  /// Onda baja y de barras más anchas (escritorio).
+  final bool compact;
+
   const SeekBar({
     super.key,
     required this.position,
@@ -1954,6 +1979,7 @@ class SeekBar extends StatefulWidget {
     required this.onChangeEnd,
     this.inline = false,
     this.peaks,
+    this.compact = false,
   });
 
   @override
@@ -1984,6 +2010,9 @@ class _SeekBarState extends State<SeekBar> {
             position: widget.position,
             duration: widget.duration,
             onSeek: widget.onChangeEnd,
+            height: widget.compact ? 32 : 48,
+            horizontalInset: widget.inline ? 0 : 24,
+            minBarSlot: widget.compact ? 5 : 4,
             onScrub: (d) => setState(
               () => _dragValue = d?.inMilliseconds.toDouble(),
             ),

@@ -66,16 +66,12 @@ class _DesktopPlaybackBarState extends State<DesktopPlaybackBar> {
                 const SizedBox(width: 8),
               ],
               Expanded(
-                child: StreamBuilder<Duration>(
-                  stream: audioHandler.player.positionStream,
-                  builder: (context, posSnapshot) {
-                    return SeekBar(
-                      inline: true,
-                      position: posSnapshot.data ?? Duration.zero,
-                      duration: item.duration ?? Duration.zero,
-                      onChangeEnd: audioHandler.seek,
-                    );
-                  },
+                child: WaveformSeekSection(
+                  inline: true,
+                  compact: true,
+                  mediaItem: item,
+                  positionStream: audioHandler.player.positionStream,
+                  onSeek: audioHandler.seek,
                 ),
               ),
               const SizedBox(width: 12),

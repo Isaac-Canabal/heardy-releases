@@ -7,6 +7,7 @@ import 'package:heardy/widgets/waveform_seek_bar.dart';
 Widget _host({
   required List<Duration> seeks,
   List<Duration?>? scrubs,
+  double inset = 0,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -19,6 +20,7 @@ Widget _host({
             duration: const Duration(seconds: 100),
             onSeek: seeks.add,
             onScrub: scrubs?.add,
+            horizontalInset: inset,
             activeColor: Colors.blue,
             inactiveColor: Colors.grey,
             semanticsLabel: 'Progreso',
@@ -59,5 +61,21 @@ void main() {
     await tester.pumpWidget(_host(seeks: []));
     expect(find.bySemanticsLabel('Progreso'), findsOneWidget);
     handle.dispose();
+  });
+
+  testWidgets('con inset, el borde interior mapea a 0 y al total', (t) async {
+    final seeks = <Duration>[];
+    await t.pumpWidget(_host(seeks: seeks, inset: 20));
+    final left = t.getTopLeft(find.byType(WaveformSeekBar));
+    await t.tapAt(left + const Offset(20, 10));
+    await t.tapAt(left + const Offset(180, 10));
+    await t.tapAt(left + const Offset(2, 10));
+    await t.tapAt(left + const Offset(198, 10));
+    expect(seeks, [
+      Duration.zero,
+      const Duration(seconds: 100),
+      Duration.zero,
+      const Duration(seconds: 100),
+    ]);
   });
 }

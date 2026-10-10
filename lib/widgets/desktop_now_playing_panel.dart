@@ -312,13 +312,11 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                         const SizedBox(height: 12),
                         _Controls(audioHandler: audioHandler),
                         const SizedBox(height: 12),
-                        StreamBuilder<Duration>(
-                          stream: audioHandler.player.positionStream,
-                          builder: (context, snapshot) => SeekBar(
-                            position: snapshot.data ?? Duration.zero,
-                            duration: item.duration ?? Duration.zero,
-                            onChangeEnd: audioHandler.seek,
-                          ),
+                        WaveformSeekSection(
+                          compact: true,
+                          mediaItem: item,
+                          positionStream: audioHandler.player.positionStream,
+                          onSeek: audioHandler.seek,
                         ),
                         const SizedBox(height: 4),
                         const Center(child: DesktopVolumeControl()),

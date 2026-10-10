@@ -220,7 +220,7 @@ jobs:
         with:
           tag_name: ${{ needs.check.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          name: ${{ needs.check.outputs.tag }}
+          name: Heardy ${{ needs.check.outputs.version }}
           draft: ${{ steps.draft.outputs.draft == 'true' }}
           generate_release_notes: true
           files: |

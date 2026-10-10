@@ -373,3 +373,7 @@ NowPlayingAddAction nowPlayingAddAction(MediaItem item) {
   }
   return item.id.isEmpty ? NowPlayingAddAction.none : NowPlayingAddAction.addLocal;
 }
+
+/// En el teléfono el botón "Añadir" sólo sirve para bajar una pista en streaming.
+bool showsPhoneAddButton(MediaItem item) =>
+    nowPlayingAddAction(item) == NowPlayingAddAction.downloadStream;

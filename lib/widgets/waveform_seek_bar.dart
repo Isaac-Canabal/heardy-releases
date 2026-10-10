@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -16,6 +17,13 @@ class WaveformSeekBar extends StatefulWidget {
   final Color activeColor;
   final Color inactiveColor;
   final double height;
+
+  /// Margen lateral: las barras y el área táctil se limitan al ancho interior,
+  /// así que tocar en el borde interior izquierdo es 0 y en el derecho el total.
+  final double horizontalInset;
+
+  /// Ancho mínimo por barra; si hay más picos que barras caben, se agrupan.
+  final double minBarSlot;
   final String semanticsLabel;
   final String semanticsValue;
 
@@ -31,6 +39,8 @@ class WaveformSeekBar extends StatefulWidget {
     required this.semanticsValue,
     this.onScrub,
     this.height = 48,
+    this.horizontalInset = 0,
+    this.minBarSlot = 0,
   });
 
   @override
@@ -84,17 +94,18 @@ class _WaveformSeekBarState extends State<WaveformSeekBar> {
       child: ExcludeSemantics(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final width = constraints.maxWidth;
+            final inset = widget.horizontalInset;
+            final width = math.max(constraints.maxWidth - 2 * inset, 1.0);
             return GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTapUp: _enabled
-                  ? (d) => _commit(d.localPosition.dx, width)
+                  ? (d) => _commit(d.localPosition.dx - inset, width)
                   : null,
               onHorizontalDragStart: _enabled
-                  ? (d) => _scrub(d.localPosition.dx, width)
+                  ? (d) => _scrub(d.localPosition.dx - inset, width)
                   : null,
               onHorizontalDragUpdate: _enabled
-                  ? (d) => _scrub(d.localPosition.dx, width)
+                  ? (d) => _scrub(d.localPosition.dx - inset, width)
                   : null,
               onHorizontalDragEnd: _enabled
                   ? (_) {
@@ -109,6 +120,8 @@ class _WaveformSeekBarState extends State<WaveformSeekBar> {
                 child: CustomPaint(
                   painter: WaveformPainter(
                     peaks: widget.peaks,
+                    inset: inset,
+                    minBarSlot: widget.minBarSlot,
                     fraction: fraction,
                     activeColor: widget.activeColor,
                     inactiveColor: widget.inactiveColor,
@@ -128,8 +141,12 @@ class WaveformPainter extends CustomPainter {
   final double fraction;
   final Color activeColor;
   final Color inactiveColor;
+  final double inset;
+  final double minBarSlot;
 
   WaveformPainter({
+    this.inset = 0,
+    this.minBarSlot = 0,
     required this.peaks,
     required this.fraction,
     required this.activeColor,
@@ -138,9 +155,13 @@ class WaveformPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final n = peaks.length;
-    if (n == 0 || size.width <= 0) return;
-    final slot = size.width / n;
+    final inner = size.width - 2 * inset;
+    if (peaks.isEmpty || inner <= 0) return;
+    final n = minBarSlot > 0
+        ? math.max(1, math.min(peaks.length, (inner / minBarSlot).floor()))
+        : peaks.length;
+    final bars = n == peaks.length ? peaks : _group(peaks, n);
+    final slot = inner / n;
     final barWidth = (slot * 0.6).clamp(1.0, 6.0);
     final minHeight = 3.0;
     final centerY = size.height / 2;
@@ -148,8 +169,8 @@ class WaveformPainter extends CustomPainter {
     void drawBars(Color color) {
       final paint = Paint()..color = color;
       for (var i = 0; i < n; i++) {
-        final h = minHeight + (size.height - minHeight) * (peaks[i] / 255.0);
-        final cx = slot * i + slot / 2;
+        final h = minHeight + (size.height - minHeight) * (bars[i] / 255.0);
+        final cx = inset + slot * i + slot / 2;
         canvas.drawRRect(
           RRect.fromRectAndRadius(
             Rect.fromCenter(
@@ -166,13 +187,31 @@ class WaveformPainter extends CustomPainter {
 
     drawBars(inactiveColor);
     canvas.save();
-    canvas.clipRect(Rect.fromLTWH(0, 0, size.width * fraction, size.height));
+    canvas.clipRect(
+      Rect.fromLTWH(0, 0, inset + inner * fraction, size.height),
+    );
     drawBars(activeColor);
     canvas.restore();
   }
 
+  static Uint8List _group(Uint8List peaks, int n) {
+    final out = Uint8List(n);
+    for (var i = 0; i < n; i++) {
+      final from = (i * peaks.length / n).floor();
+      final to = math.max(from + 1, ((i + 1) * peaks.length / n).floor());
+      var m = 0;
+      for (var j = from; j < to && j < peaks.length; j++) {
+        if (peaks[j] > m) m = peaks[j];
+      }
+      out[i] = m;
+    }
+    return out;
+  }
+
   @override
   bool shouldRepaint(covariant WaveformPainter old) =>
+      old.inset != inset ||
+      old.minBarSlot != minBarSlot ||
       old.fraction != fraction ||
       old.activeColor != activeColor ||
       old.inactiveColor != inactiveColor ||
