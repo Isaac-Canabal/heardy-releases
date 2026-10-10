@@ -1,6 +1,6 @@
 # Heardy
 
-Heardy es un reproductor y biblioteca de música para Android y Windows. Trabaja sobre los archivos de audio que ya tenés en el dispositivo, los organiza en playlists, lee su metadata y los reproduce sin backend, sin cuenta y sin conexión. Lo demás (letras, estadísticas, sincronización entre dispositivos, importar desde un enlace) es opcional y se suma encima sin cambiar eso.
+Heardy es un reproductor y biblioteca de música para Android y Windows. Trabaja sobre los archivos de audio que ya tenés en el dispositivo, los organiza en playlists, lee su metadata y los reproduce sin conexión. Además suma, de forma opcional, letras sincronizadas, estadísticas, cuenta con sincronización entre dispositivos, amigos, Explorar e importar desde un enlace; ninguna es necesaria para escuchar tu biblioteca.
 
 Este repositorio contiene el **código fuente de la app** y publica los binarios de cada versión como [Releases](../../releases).
 
