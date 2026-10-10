@@ -16,6 +16,7 @@ import '../services/remote_track_actions.dart';
 import '../services/stream_resolver.dart';
 import '../theme/app_theme.dart';
 import '../widgets/desktop_shell_scope.dart';
+import '../widgets/explore_customize_sheet.dart';
 import '../widgets/explore_shelves.dart';
 import '../widgets/remote_track_actions_mixin.dart';
 import '../widgets/remote_track_tile.dart';
@@ -101,9 +102,17 @@ class _ExploreScreenState extends State<ExploreScreen>
     }
   }
 
-  Future<void> _refresh() {
+  Future<void> _refresh() async {
     final provider = context.read<ExploreProvider>();
-    return _gate() == RemoteAccessGate.ok ? provider.refresh() : provider.loadLocal();
+    if (_gate() != RemoteAccessGate.ok) return provider.loadLocal();
+    await provider.refresh();
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(provider.hasNetworkError ? l10n.exploreRefreshFailed : l10n.exploreRefreshed),
+      ));
   }
 
   Future<void> _playLocal(Song song, List<Song> list) async {    DesktopShellScope.maybeOf(context)?.openNowPlaying();
@@ -128,6 +137,47 @@ class _ExploreScreenState extends State<ExploreScreen>
     } finally {
       _startingPlay = false;
     }
+  }
+
+  /// Tras un cambio de ajustes (secciones o país) el provider carga lo recién
+  /// mostrado y recarga las regionales; sin acceso remoto sólo las locales.
+  void _applyPreferences() {
+    if (!mounted) return;
+    final provider = context.read<ExploreProvider>();
+    if (_gate() == RemoteAccessGate.ok) {
+      provider.syncPreferences();
+    } else {
+      provider.loadLocal();
+    }
+  }
+
+  void _openCustomize() => showExploreCustomizeSheet(context, onChanged: _applyPreferences);
+
+  Future<void> _hideShelf(ExploreShelfId id) => context.read<SettingsProvider>().setExploreShelfHidden(id, true);
+
+  Future<void> _restoreShelves() async {
+    await context.read<SettingsProvider>().showAllExploreShelves();
+    _applyPreferences();
+  }
+
+  Widget _sectionMenu(ExploreShelfId id) {
+    final l10n = AppLocalizations.of(context)!;
+    return PopupMenuButton<String>(
+      key: Key('explore_section_menu_${id.name}'),
+      tooltip: l10n.exploreSectionMenuTooltip,
+      icon: Icon(Icons.more_horiz_rounded, color: Colors.white.withValues(alpha: 0.6)),
+      onSelected: (action) {
+        if (action == 'hide') {
+          _hideShelf(id);
+        } else {
+          showExploreCountryPicker(context, onChanged: _applyPreferences);
+        }
+      },
+      itemBuilder: (_) => [
+        PopupMenuItem(value: 'hide', child: Text(l10n.exploreSectionHide)),
+        if (isRegionalShelf(id)) PopupMenuItem(value: 'country', child: Text(l10n.exploreSectionChangeCountry)),
+      ],
+    );
   }
 
   void _openSearch([String? query]) =>
@@ -215,7 +265,9 @@ class _ExploreScreenState extends State<ExploreScreen>
       _networkRequested = false;
     }
 
-    final moods = flattenMoods(provider.moods.data ?? const []);
+    final hidden = context.watch<SettingsProvider>().exploreHiddenShelves;
+    final moods = hidden.contains(ExploreShelfId.moods) ? const <ExploreMood>[] : flattenMoods(provider.moods.data ?? const []);
+    final allHidden = hidden.length >= ExploreShelfId.values.length;
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: _refresh,
@@ -232,9 +284,13 @@ class _ExploreScreenState extends State<ExploreScreen>
               ),
             SliverList(
               delegate: SliverChildListDelegate([
-                _buildRecent(l10n, provider),
-                ..._buildNetworkShelves(l10n, provider, gate),
-                _buildArtists(l10n, provider),
+                if (allHidden)
+                  _buildAllHidden(l10n)
+                else ...[
+                  if (!hidden.contains(ExploreShelfId.recent)) _buildRecent(l10n, provider),
+                  ..._buildNetworkShelves(l10n, provider, gate, hidden),
+                  if (!hidden.contains(ExploreShelfId.artists)) _buildArtists(l10n, provider),
+                ],
                 const SizedBox(height: 100),
               ]),
             ),
@@ -250,14 +306,32 @@ class _ExploreScreenState extends State<ExploreScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            l10n.exploreTitle,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -0.5,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l10n.exploreTitle,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ),
+              IconButton(
+                key: const Key('explore_customize_button'),
+                tooltip: l10n.exploreCustomizeTooltip,
+                icon: const Icon(Icons.tune_rounded, color: Colors.white),
+                onPressed: _openCustomize,
+              ),
+              IconButton(
+                key: const Key('explore_refresh_button'),
+                tooltip: l10n.exploreRefreshTooltip,
+                icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                onPressed: _refresh,
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           // Imita un campo de texto, pero abre la pantalla de búsqueda: el
@@ -291,9 +365,20 @@ class _ExploreScreenState extends State<ExploreScreen>
     );
   }
 
+  Widget _buildAllHidden(AppLocalizations l10n) {
+    return ExploreHintCard(
+      title: l10n.exploreAllHiddenTitle,
+      body: l10n.exploreAllHiddenBody,
+      actionLabel: l10n.exploreRestoreSections,
+      onAction: _restoreShelves,
+      actionKey: const Key('explore_restore_button'),
+    );
+  }
+
   Widget _buildRecent(AppLocalizations l10n, ExploreProvider provider) {
     return ExploreShelfFrame<List<Song>>(
       title: l10n.exploreRecentTitle,
+      trailing: _sectionMenu(ExploreShelfId.recent),
       state: provider.recent,
       onRetry: provider.loadLocal,
       skeleton: const QuickPicksSkeleton(),
@@ -309,6 +394,7 @@ class _ExploreScreenState extends State<ExploreScreen>
   Widget _buildArtists(AppLocalizations l10n, ExploreProvider provider) {
     return ExploreShelfFrame<List<String>>(
       title: l10n.exploreArtistsTitle,
+      trailing: _sectionMenu(ExploreShelfId.artists),
       state: provider.artists,
       onRetry: provider.loadLocal,
       skeleton: const ExploreCardsSkeleton(size: ArtistAvatarsRow.size, circle: true),
@@ -317,7 +403,14 @@ class _ExploreScreenState extends State<ExploreScreen>
     );
   }
 
-  List<Widget> _buildNetworkShelves(AppLocalizations l10n, ExploreProvider provider, RemoteAccessGate gate) {
+  List<Widget> _buildNetworkShelves(
+    AppLocalizations l10n,
+    ExploreProvider provider,
+    RemoteAccessGate gate,
+    Set<ExploreShelfId> hidden,
+  ) {
+    const network = [ExploreShelfId.radio, ExploreShelfId.charts, ExploreShelfId.newReleases, ExploreShelfId.home];
+    if (network.every(hidden.contains)) return const [];
     if (gate != RemoteAccessGate.ok) {
       return [
         ExploreHintCard(
@@ -329,30 +422,37 @@ class _ExploreScreenState extends State<ExploreScreen>
       ];
     }
     return [
+      if (!hidden.contains(ExploreShelfId.radio))
       ExploreShelfFrame<List<RemoteTrack>>(
         title: l10n.exploreRadioTitle,
+        trailing: _sectionMenu(ExploreShelfId.radio),
         state: provider.radio,
         onRetry: () => provider.reloadShelf(ExploreShelfId.radio),
         skeleton: const ExploreCardsSkeleton(size: RemoteTrackCard.size),
         isEmpty: (tracks) => tracks.isEmpty,
         builder: (tracks) => _tracksRow(tracks),
       ),
+      if (!hidden.contains(ExploreShelfId.charts))
       ExploreShelfFrame<List<ExplorePlaylist>>(
         title: l10n.exploreChartsTitle,
+        trailing: _sectionMenu(ExploreShelfId.charts),
         state: provider.charts,
         onRetry: () => provider.reloadShelf(ExploreShelfId.charts),
         skeleton: const ExploreCardsSkeleton(size: 160),
         isEmpty: (l) => l.isEmpty,
         builder: (l) => ExplorePlaylistsRow(playlists: l, onTap: _openPlaylist),
       ),
+      if (!hidden.contains(ExploreShelfId.newReleases))
       ExploreShelfFrame<List<ExploreAlbum>>(
         title: l10n.exploreNewReleasesTitle,
+        trailing: _sectionMenu(ExploreShelfId.newReleases),
         state: provider.newReleases,
         onRetry: () => provider.reloadShelf(ExploreShelfId.newReleases),
         skeleton: const ExploreCardsSkeleton(),
         isEmpty: (l) => l.isEmpty,
         builder: (l) => ExploreAlbumsRow(albums: l, onTap: _openAlbum),
       ),
+      if (!hidden.contains(ExploreShelfId.home))
       ExploreShelfFrame<List<ExploreShelf>>(
         title: null,
         state: provider.home,
@@ -362,8 +462,8 @@ class _ExploreScreenState extends State<ExploreScreen>
         builder: (shelves) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final shelf in shelves) ...[
-              ExploreShelfHeader(shelf.title),
+            for (final (i, shelf) in shelves.indexed) ...[
+              ExploreShelfHeader(shelf.title, trailing: i == 0 ? _sectionMenu(ExploreShelfId.home) : null),
               switch (shelf.kind) {
                 ExploreShelfKind.playlists =>
                   ExplorePlaylistsRow(playlists: shelf.playlists, onTap: _openPlaylist),

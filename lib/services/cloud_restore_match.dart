@@ -9,12 +9,11 @@ import 'app_log.dart';
 /// coincidencia elegida (W7 del plan de escritorio, estrategia híbrida de
 /// la Etapa 16 E-2).
 ///
-/// No hay `sourceUrl` guardado en el índice de la nube (ver CLAUDE.md, Cloud
-/// sync: sólo se guarda metadata, nunca nada que sólo signifique algo en el
-/// dispositivo que lo subió) — así que lo que se reconstruye es "la misma
-/// canción", no "el mismo archivo exacto". Si el resultado produce un audio
-/// distinto al original, el hash será distinto y quedará como una canción
-/// nueva — la deduplicación por hash de `DownloadService` es la que evita
+/// Si la fila trae `sourceUrl` (toda descarga lo guarda y el índice de la nube
+/// lo sincroniza) se resuelve ese enlace y se restaura el original exacto; sin
+/// él lo que se reconstruye es "la misma canción", no "el mismo archivo": si el
+/// resultado produce un audio distinto el hash será distinto y quedará como una
+/// canción nueva — la deduplicación por hash de `DownloadService` evita
 /// duplicados cuando sí coincide.
 class CloudSongMatch {
   final Map<String, dynamic> cloudSong;
@@ -106,10 +105,8 @@ Future<CloudSongMatch> matchCloudSong(
 /// de la nube a la que pertenecen, usando [playlistSongs] (misma forma que
 /// `CloudLibrary.playlistSongs`: filas `{playlistId, songId, orderIndex}`).
 /// Una canción sin ninguna fila en `playlistSongs` cae bajo la clave `null`
-/// — "suelta en la nube", el mismo concepto que la Bandeja local (D6), y
-/// [groupMissingSongsByPlaylist] no intenta resolverla: la cola de descargas
-/// exige un `playlistId` real (ver W7 del plan de escritorio), así que estas
-/// quedan fuera de la restauración automática.
+/// — "suelta en la nube", el mismo concepto que la Bandeja local (D6); quien
+/// restaura las manda a la Bandeja (`inboxDownloadTarget`).
 Map<String?, List<Map<String, dynamic>>> groupMissingSongsByPlaylist(
   List<Map<String, dynamic>> missingSongs,
   List<Map<String, dynamic>> playlistSongs,

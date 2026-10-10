@@ -6,7 +6,6 @@ import '../providers/download_provider.dart';
 import '../providers/music_provider.dart';
 import '../providers/notifications_provider.dart';
 import '../providers/settings_provider.dart';
-import '../providers/sync_provider.dart';
 import '../services/account_prompt.dart';
 import '../services/database_helper.dart';
 import '../services/desktop_layout.dart';
@@ -198,8 +197,6 @@ class _MainShellScreenState extends State<MainShellScreen>
     final downloadProvider = context.read<DownloadProvider>();
     downloadProvider.processQueue();
     downloadProvider.retryPendingImports();
-    // Estrangulado por dentro (15 min) — ver SyncProvider.onAppResumed.
-    context.read<SyncProvider>().onAppResumed();
     // Estrangulado por dentro (1 h) — ver NotificationsProvider.onAppResumed.
     context.read<NotificationsProvider>().onAppResumed();
   }

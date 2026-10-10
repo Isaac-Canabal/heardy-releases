@@ -191,6 +191,41 @@ void main() {
     return provider;
   }
 
+  group('destino Bandeja', () {
+    test('un trabajo suelto se descarga sin playlist y no se descarta por "playlist inexistente"', () async {
+      final service = _FakeDownloadService();
+      final completed = <String>[];
+      final provider = providerFor(service, completed: completed);
+
+      final added = await provider.enqueueTrack(
+        _track('suelta1'),
+        playlistId: inboxDownloadTarget,
+        metadataComplete: false,
+        sourceType: 'restore',
+      );
+      await provider.processQueue();
+
+      expect(added, isTrue);
+      expect(service.calls, hasLength(1));
+      expect(service.calls.single.playlistId, isNull);
+      expect(provider.failures, isEmpty);
+      expect(await db.getDownloadQueue(), isEmpty);
+      expect(completed, [inboxDownloadTarget]);
+    });
+
+    test('la misma canción no se encola dos veces en la Bandeja', () async {
+      final provider = providerFor(_FakeDownloadService());
+      expect(
+        await provider.enqueueTrack(_track('suelta2'), playlistId: inboxDownloadTarget, metadataComplete: false),
+        isTrue,
+      );
+      expect(
+        await provider.enqueueTrack(_track('suelta2'), playlistId: inboxDownloadTarget, metadataComplete: false),
+        isFalse,
+      );
+    });
+  });
+
   group('regla del /resolve', () {
     test('un trabajo con metadata plana se resuelve; uno ya resuelto no gasta la petición', () async {
       final service = _FakeDownloadService();

@@ -130,6 +130,7 @@ RemoteTrack _track({
   String title = 'Título',
   String artist = 'Artista',
   String? album,
+  String? sourceUrl,
 }) {
   return RemoteTrack(
     id: id,
@@ -138,7 +139,7 @@ RemoteTrack _track({
     album: album,
     durationSeconds: 180,
     thumbnailUrl: 'http://ejemplo/thumb.jpg',
-    sourceUrl: 'https://www.youtube.com/watch?v=$id',
+    sourceUrl: sourceUrl ?? 'https://www.youtube.com/watch?v=$id',
   );
 }
 
@@ -249,6 +250,21 @@ void main() {
     final scan = await LibraryScanService().scan(root.uri);
     expect(scan.inserted, 0);
     expect(scan.unchanged, 1);
+  });
+
+  test('la rama de duplicado rellena sourceUrl si la fila existente no tenía y nunca lo pisa', () async {
+    final audio = Uint8List.fromList(List.generate(5200, (i) => (i * 7 + 11) % 256));
+    final source = _FakeSource({'vid005': _buildM4a(audio)});
+    final service = serviceFor(source);
+
+    final first = await service.download(_track(id: 'vid005', sourceUrl: ''));
+    expect((await db.getSongById(first.song.id))!.sourceUrl, isNull);
+
+    await service.download(_track(id: 'vid005'));
+    expect((await db.getSongById(first.song.id))!.sourceUrl, 'https://www.youtube.com/watch?v=vid005');
+
+    await service.download(_track(id: 'vid005', sourceUrl: 'https://youtu.be/otroOtroOtr'));
+    expect((await db.getSongById(first.song.id))!.sourceUrl, 'https://www.youtube.com/watch?v=vid005');
   });
 
   test('sin playlist destino la descarga cae en la bandeja, como cualquier archivo suelto', () async {

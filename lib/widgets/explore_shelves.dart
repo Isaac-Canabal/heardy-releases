@@ -20,21 +20,26 @@ double exploreCardListHeight(BuildContext context, double size) =>
 
 class ExploreShelfHeader extends StatelessWidget {
   final String title;
-  const ExploreShelfHeader(this.title, {super.key});
+
+  /// Menú de la sección (ocultar, cambiar país), alineado a la derecha.
+  final Widget? trailing;
+  const ExploreShelfHeader(this.title, {super.key, this.trailing});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(kExploreGutter, 24, kExploreGutter, 12),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 20,
-          fontWeight: FontWeight.w800,
-          letterSpacing: -0.3,
-        ),
+    final text = Text(
+      title,
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 20,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -0.3,
       ),
+    );
+    final menu = trailing;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(kExploreGutter, menu == null ? 24 : 16, menu == null ? kExploreGutter : 4, 12),
+      child: menu == null ? text : Row(children: [Expanded(child: text), menu]),
     );
   }
 }
@@ -45,6 +50,9 @@ class ExploreShelfHeader extends StatelessWidget {
 class ExploreShelfFrame<T> extends StatelessWidget {
   /// null: sin cabecera (Inicio pinta una por cada estantería del servidor).
   final String? title;
+
+  /// Menú de la cabecera; ignorado si [title] es null.
+  final Widget? trailing;
   final ShelfState<T> state;
   final VoidCallback onRetry;
   final Widget skeleton;
@@ -57,6 +65,7 @@ class ExploreShelfFrame<T> extends StatelessWidget {
   const ExploreShelfFrame({
     super.key,
     required this.title,
+    this.trailing,
     required this.state,
     required this.onRetry,
     required this.skeleton,
@@ -84,7 +93,7 @@ class ExploreShelfFrame<T> extends StatelessWidget {
     if (t == null) return body;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [ExploreShelfHeader(t), body],
+      children: [ExploreShelfHeader(t, trailing: trailing), body],
     );
   }
 }
@@ -728,8 +737,16 @@ class ExploreHintCard extends StatelessWidget {
   final String body;
   final String? actionLabel;
   final VoidCallback? onAction;
+  final Key actionKey;
 
-  const ExploreHintCard({super.key, required this.title, required this.body, this.actionLabel, this.onAction});
+  const ExploreHintCard({
+    super.key,
+    required this.title,
+    required this.body,
+    this.actionLabel,
+    this.onAction,
+    this.actionKey = const Key('explore_hint_action'),
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -757,7 +774,7 @@ class ExploreHintCard extends StatelessWidget {
           if (actionLabel != null && onAction != null) ...[
             const SizedBox(height: 12),
             FilledButton(
-              key: const Key('explore_hint_action'),
+              key: actionKey,
               style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
               onPressed: onAction,
               child: Text(actionLabel!),

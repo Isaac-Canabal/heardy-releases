@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' show Random;
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -7,11 +8,20 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:saf_util/saf_util.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/history_entry.dart';
+import '../providers/settings_provider.dart';
 import 'database_helper.dart';
 import 'playback_state_service.dart';
 import 'app_log.dart';
 import 'download_source.dart';
+import 'fade_logic.dart';
+import 'metadata_service.dart';
+import 'replay_gain_logic.dart';
+import 'playback_speed_logic.dart';
+import 'repeat_count_logic.dart';
+import 'shuffle_logic.dart';
+import 'sleep_timer_logic.dart';
 import 'stream_queue_logic.dart';
 import 'stream_resolver.dart';
 
@@ -117,26 +127,102 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   Future<void> setVolume(double value) async {
     final v = clampVolume(value);
     volume.value = v;
-    if (!_sleepFading) {
-      try {
-        await _player.setVolume(v);
-      } catch (e) {
-        print('Error ajustando el volumen: $e');
-      }
-    }
+    await _pushVolume();
     PlaybackStateService.saveVolume(v);
+  }
+
+  // Volumen real del motor = elegido por el usuario x normalización de la
+  // pista x fundido de borde de pista.
+  bool _normalizeVolume = false;
+  bool _trackFade = false;
+  double _normFactor = 1.0;
+  double _fadeFactor = 1.0;
+  Timer? _fadeTimer;
+
+  double get _outputFactor => _normFactor * _fadeFactor;
+
+  Future<void> _pushVolume() async {
+    if (_sleepFading) return;
+    try {
+      await _player.setVolume(clampVolume(volume.value * _outputFactor));
+    } catch (e) {
+      print('Error ajustando el volumen: $e');
+    }
+  }
+
+  Future<void> _loadAudioPrefs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await setNormalizeVolume(prefs.getBool(SettingsProvider.normalizeVolumeKey) ?? false);
+      await setSkipSilence(prefs.getBool(SettingsProvider.skipSilenceKey) ?? false);
+      setTrackFade(prefs.getBool(SettingsProvider.trackFadeKey) ?? false);
+    } catch (e) {
+      print('Error leyendo opciones de audio: $e');
+    }
+  }
+
+  /// Normalización por ReplayGain: sólo atenúa (factor <= 1.0). Cubre únicamente
+  /// canciones importadas con la etiqueta (MP3/FLAC/OGG/Opus); el M4A de las
+  /// descargas no la trae, y las canciones sin ella suenan sin cambios.
+  Future<void> setNormalizeVolume(bool enabled) async {
+    _normalizeVolume = enabled;
+    await _updateNormalization(mediaItem.value);
+  }
+
+  Future<void> _updateNormalization(MediaItem? item) async {
+    var factor = 1.0;
+    if (_normalizeVolume && item != null && _streamTracks == null) {
+      final db = await MetadataService.storedReplayGainDb(item.id);
+      if (db != null) factor = replayGainFactor(db);
+    }
+    if (mediaItem.value?.id != item?.id) return;
+    _normFactor = factor;
+    await _pushVolume();
+  }
+
+  /// Sólo Android (ExoPlayer). En Windows el `af` de mpv ya lo usa el
+  /// ecualizador y un segundo filtro lo pisaría, así que no se ofrece.
+  bool get supportsSkipSilence => Platform.isAndroid;
+
+  Future<void> setSkipSilence(bool enabled) async {
+    if (!supportsSkipSilence) return;
+    try {
+      await _player.setSkipSilenceEnabled(enabled);
+    } catch (e) {
+      print('Error ajustando saltar silencios: $e');
+    }
+  }
+
+  /// Fundido de salida/entrada en los bordes de cada pista (no solapa pistas:
+  /// un solo reproductor no puede mezclar dos). Se calcula por posición cada
+  /// 100 ms mientras suena, sólo si la opción está activa.
+  void setTrackFade(bool enabled) {
+    _trackFade = enabled;
+    _fadeTimer?.cancel();
+    _fadeTimer = null;
+    if (!enabled) {
+      if (_fadeFactor != 1.0) {
+        _fadeFactor = 1.0;
+        _pushVolume();
+      }
+      return;
+    }
+    _fadeTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!_trackFade || !_player.playing || _sleepFading) return;
+      final duration = _trackingMediaItem?.duration ?? _player.duration;
+      if (duration == null || _streamTracks != null) return;
+      final next = trackFadeGain(_player.position, duration, trackFadeDuration);
+      if (!shouldApplyGain(_fadeFactor, next)) return;
+      _fadeFactor = next;
+      _pushVolume();
+    });
   }
 
   Future<void> _restoreVolume() async {
     final raw = await PlaybackStateService.restoreVolume();
     if (raw == null) return;
-    final saved = clampVolume(raw);
-    volume.value = saved;
-    try {
-      await _player.setVolume(saved);
-    } catch (e) {
-      print('Error restaurando el volumen: $e');
-    }
+    volume.value = clampVolume(raw);
+    await _pushVolume();
   }
 
   // --- SLEEP TIMER ---
@@ -162,7 +248,39 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     return remaining.isNegative ? Duration.zero : remaining;
   }
 
-  bool get isSleepTimerActive => _sleepEndTime != null;
+  bool get isSleepTimerActive => _sleepEndTime != null || _sleepTracks.isActive;
+
+  final TrackSleepCounter _sleepTracks = TrackSleepCounter();
+  // Índice de la pista que suena, para detectar cuándo termina una; null tras
+  // cargar una cola nueva, para que ese cambio de índice no cuente como fin.
+  int? _sleepPrevIndex;
+
+  /// Pistas que faltan para que se pause la reproducción (la actual incluida),
+  /// o null si no hay temporizador por pistas.
+  final ValueNotifier<int?> sleepTracksRemaining = ValueNotifier<int?>(null);
+
+  /// Pausa al terminar la [tracks]-ésima pista desde ahora (la actual cuenta
+  /// como la primera), sin cortar a media canción.
+  void startSleepAfterTracks(int tracks) {
+    _cleanupSleepTimerOnly();
+    _sleepTracks.start(tracks);
+    _sleepPrevIndex = _player.currentIndex;
+    sleepTracksRemaining.value = _sleepTracks.remaining;
+  }
+
+  Future<void> _onSleepTrackBoundary() async {
+    if (!_sleepTracks.isActive) return;
+    final stop = _sleepTracks.onTrackEnded();
+    sleepTracksRemaining.value = _sleepTracks.remaining;
+    if (!stop) return;
+    // La pista siguiente ya empezó: se pausa y se deja al inicio.
+    try {
+      await pause();
+      await _player.seek(Duration.zero);
+    } catch (e) {
+      print('Error pausando por el temporizador de pistas: $e');
+    }
+  }
 
   void startSleepTimer(Duration duration) {
     _cleanupSleepTimerOnly();
@@ -182,7 +300,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   /// User-initiated cancel. If a fade-out is mid-flight, restores volume and
   /// keeps the song playing (case: cancel during fade-out).
   Future<void> cancelSleepTimer() async {
-    if (_sleepEndTime == null) return;
+    if (_sleepEndTime == null) {
+      _cleanupSleepTimerOnly();
+      return;
+    }
     if (_sleepFading) {
       await _abortSleepFadeAndCleanup();
     } else {
@@ -214,7 +335,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       stepsLeft--;
       try {
         await _player.setVolume(
-          (stepsLeft / steps).clamp(0.0, 1.0) * volume.value,
+          clampVolume((stepsLeft / steps).clamp(0.0, 1.0) * volume.value * _outputFactor),
         );
       } catch (e) {
         print('Error ajustando volumen durante fade-out: $e');
@@ -236,7 +357,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     } finally {
       _pausingFromSleepFade = false;
       try {
-        await _player.setVolume(volume.value);
+        await _player.setVolume(clampVolume(volume.value * _outputFactor));
       } catch (e) {
         print('Error restaurando volumen tras el fade-out: $e');
       } finally {
@@ -253,7 +374,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     _sleepFadeTicker = null;
     _sleepFading = false;
     try {
-      await _player.setVolume(volume.value);
+      await _player.setVolume(clampVolume(volume.value * _outputFactor));
     } catch (e) {
       print('Error restaurando volumen al abortar fade-out: $e');
     } finally {
@@ -270,7 +391,95 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     _sleepTickTimer = null;
     _sleepEndTime = null;
     _sleepFading = false;
+    _sleepTracks.cancel();
+    sleepTracksRemaining.value = null;
     _sleepTimerController.add(null);
+  }
+
+  // --- REPETIR N VECES ---
+  // Se apoya en LoopMode.one (que just_audio/mpv resuelven sin cambiar el
+  // índice) y cuenta las vueltas con la detección de `_onTrackingPosition`.
+  // Es de la sesión: se anula al saltar de canción, cambiar el modo de
+  // repetición a mano, cargar una cola nueva o detener.
+  final RepeatCounter _repeatCounter = RepeatCounter();
+  LoopMode _repeatRestoreMode = LoopMode.off;
+
+  /// Repeticiones que faltan de la canción actual; 0 si no hay cuenta activa.
+  final ValueNotifier<int> repeatRemaining = ValueNotifier<int>(0);
+
+  /// Repite la canción actual [extraPlays] veces más y luego sigue normal.
+  Future<void> startRepeatCount(int extraPlays) async {
+    if (_streamTracks != null) return;
+    if (!_repeatCounter.isActive) {
+      final current = _player.loopMode;
+      _repeatRestoreMode = current == LoopMode.one ? LoopMode.off : current;
+    }
+    _repeatCounter.start(extraPlays);
+    repeatRemaining.value = _repeatCounter.remaining;
+    try {
+      await _player.setLoopMode(LoopMode.one);
+    } catch (e) {
+      print('Error activando la repetición: $e');
+      _repeatCounter.cancel();
+      repeatRemaining.value = 0;
+    }
+  }
+
+  Future<void> cancelRepeatCount({bool restoreMode = true}) async {
+    if (!_repeatCounter.isActive) return;
+    _repeatCounter.cancel();
+    repeatRemaining.value = 0;
+    if (!restoreMode) return;
+    try {
+      await _player.setLoopMode(_repeatRestoreMode);
+    } catch (e) {
+      print('Error restaurando el modo de repetición: $e');
+    }
+  }
+
+  void _onLoopWrap() {
+    if (_repeatCounter.isActive) {
+      final keepLooping = _repeatCounter.onWrap();
+      repeatRemaining.value = _repeatCounter.remaining;
+      if (!keepLooping) {
+        _player.setLoopMode(_repeatRestoreMode).catchError((Object e) {
+          print('Error restaurando el modo de repetición: $e');
+        });
+      }
+    }
+    _onSleepTrackBoundary();
+  }
+
+  // --- VELOCIDAD Y TONO ---
+  // La velocidad también la guarda `PlaybackStateService` y la restaura
+  // `MusicProvider`; el tono es sólo de la sesión. Android (ExoPlayer) y
+  // Windows (mpv vía el parche de media_kit) soportan ambos.
+
+  bool get supportsPitch => Platform.isAndroid || Platform.isWindows;
+
+  Future<void> setPlaybackSpeed(double value) async {
+    final v = normalizePlaybackRate(value);
+    try {
+      await _player.setSpeed(v);
+      playbackState.add(_buildPlaybackState(_lastEvent));
+    } catch (e) {
+      print('Error ajustando la velocidad: $e');
+    }
+  }
+
+  Future<void> setPlaybackPitch(double value) async {
+    if (!supportsPitch) return;
+    final v = normalizePlaybackRate(value);
+    try {
+      await _player.setPitch(v);
+    } catch (e) {
+      print('Error ajustando el tono: $e');
+    }
+  }
+
+  Future<void> resetPlaybackSpeedAndPitch() async {
+    await setPlaybackSpeed(1.0);
+    await setPlaybackPitch(1.0);
   }
 
   final StreamController<StreamPlaybackError> _streamErrorController =
@@ -359,9 +568,12 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     _cancelStreamQueue();
     _streamReady = false;
     _streamErrorReportedFor = null;
+    _repeatCounter.cancel();
+    repeatRemaining.value = 0;
     if (_player.loopMode != LoopMode.off) {
       await _player.setLoopMode(LoopMode.off);
     }
+    _unshuffledQueue = null;
     _streamTracks = seed.tracks;
     _streamItems = [for (final t in seed.tracks) streamMediaItem(t)];
     _streamIndex = seed.startIndex;
@@ -530,6 +742,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     // Intentar restaurar estado guardado al iniciar
     _restoreSavedState();
     _restoreVolume();
+    _loadAudioPrefs();
     
     // Pipe just_audio events to audio_service's playbackState stream
     _player.playbackEventStream.listen((event) {
@@ -567,22 +780,36 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     // Synchronize mediaItem updates when active track index changes
     _player.currentIndexStream.listen((index) async {
+      // Reordenar la cola (aleatorio de escritorio) mueve el índice de la misma
+      // canción: no es un cambio de pista y no debe reiniciar el seguimiento.
+      if (_reorderingQueue) return;
       await _finalizePlay();
+      final previousIndex = _sleepPrevIndex;
+      _sleepPrevIndex = index;
+      if (_repeatCounter.isActive) await cancelRepeatCount();
       if (_streamTracks != null) {
         // Fuente única: el índice del player no es el de la cola publicada.
         _playNextInsertIndex = null;
+        if (_normFactor != 1.0) {
+          _normFactor = 1.0;
+          _pushVolume();
+        }
         return;
       }
       final playlistQueue = queue.value;
       if (index != null && playlistQueue.isNotEmpty && index < playlistQueue.length) {
         mediaItem.add(playlistQueue[index]);
         _startTracking(playlistQueue[index]);
+        _updateNormalization(playlistQueue[index]);
       } else {
         _resetTracking();
       }
       // La canción actual cambió: el próximo lote de "reproducir a
       // continuación" vuelve a calcularse desde aquí.
       _playNextInsertIndex = null;
+      if (previousIndex != null && index != null && previousIndex != index) {
+        await _onSleepTrackBoundary();
+      }
     });
 
     // Force playbackState update when SHUFFLE mode changes (just_audio doesn't emit PlaybackEvent for this)
@@ -669,6 +896,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         _trackingMaxPosition >= duration - const Duration(seconds: 2)) {
       _finalizePlay();
       _startTracking(_trackingMediaItem!);
+      _onLoopWrap();
       return;
     }
 
@@ -719,7 +947,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         LoopMode.all: AudioServiceRepeatMode.all,
       }[_player.loopMode] ??
           AudioServiceRepeatMode.none,
-      shuffleMode: _player.shuffleModeEnabled
+      shuffleMode: _shuffleEnabled
           ? AudioServiceShuffleMode.all
           : AudioServiceShuffleMode.none,
     );
@@ -753,6 +981,9 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> stop() async {
+    _sleepTracks.cancel();
+    sleepTracksRemaining.value = null;
+    await cancelRepeatCount();
     _cancelStreamQueue();
     await _finalizePlay();
     await _player.stop();
@@ -859,12 +1090,97 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   @override
   Future<void> setShuffleMode(AudioServiceShuffleMode shuffleMode) async {
     final enabled = shuffleMode == AudioServiceShuffleMode.all;
-    await _player.setShuffleModeEnabled(enabled);
-    // shuffleModeEnabledStream listener will update playbackState
+    if (!_handlerShuffle) {
+      await _player.setShuffleModeEnabled(enabled);
+      // shuffleModeEnabledStream listener will update playbackState
+      return;
+    }
+    if (enabled == _desktopShuffle) return;
+    _desktopShuffle = enabled;
+    // La cola de streaming es de una sola fuente y no se baraja.
+    if (_streamTracks == null && _playlistSource != null) {
+      await _reorderQueueForShuffle(enabled);
+    } else if (!enabled) {
+      _unshuffledQueue = null;
+    }
+    playbackState.add(_buildPlaybackState(_lastEvent));
+  }
+
+  /// En escritorio (mpv) el aleatorio lo hace el handler: reordena la cola real
+  /// y el resto del código sigue usando siguiente/anterior lineales. En
+  /// Android lo hace just_audio y esto no se usa.
+  bool get _handlerShuffle => Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+
+  bool _desktopShuffle = false;
+  bool _reorderingQueue = false;
+  List<MediaItem>? _unshuffledQueue;
+  final Random _shuffleRandom = Random();
+
+  bool get _shuffleEnabled => _handlerShuffle ? _desktopShuffle : _player.shuffleModeEnabled;
+
+  /// Cola y posición a cargar para [items]: barajada con [startIndex] primero
+  /// si el aleatorio de escritorio está activo.
+  (List<MediaItem>, int) _orderForLoad(List<MediaItem> items, int startIndex) {
+    if (_handlerShuffle && _desktopShuffle) {
+      _unshuffledQueue = List<MediaItem>.of(items);
+      return (shuffleKeepingCurrent(items, startIndex, _shuffleRandom), 0);
+    }
+    _unshuffledQueue = null;
+    return (items, startIndex);
+  }
+
+  AudioSource _sourceForItem(MediaItem item) {
+    final path = item.extras?['filePath'] as String? ?? '';
+    return AudioSource.uri(_sourceUriFor(path), tag: item);
+  }
+
+  /// Reordena la cola cargada sin tocar la pista que suena: quita todo lo que
+  /// la rodea y vuelve a insertar el orden nuevo antes y después de ella.
+  Future<void> _reorderQueueForShuffle(bool enabled) async {
+    final source = _playlistSource;
+    final current = queue.value;
+    final idx = _player.currentIndex;
+    if (source == null || current.length < 2 || idx == null || idx < 0 || idx >= current.length) {
+      if (!enabled) _unshuffledQueue = null;
+      return;
+    }
+    final List<MediaItem> target;
+    if (enabled) {
+      _unshuffledQueue = List<MediaItem>.of(current);
+      target = shuffleKeepingCurrent(current, idx, _shuffleRandom);
+    } else {
+      final original = _unshuffledQueue;
+      _unshuffledQueue = null;
+      if (original == null) return;
+      target = restoreOriginalOrder(current, original, (m) => m.id);
+    }
+    final currentId = current[idx].id;
+    final pos = target.indexWhere((m) => m.id == currentId);
+    if (pos == -1) return;
+    if (sameQueueIds([for (final m in current) m.id], [for (final m in target) m.id])) return;
+
+    _reorderingQueue = true;
+    try {
+      final after = idx + 1;
+      if (after < current.length) await source.removeRange(after, current.length);
+      if (idx > 0) await source.removeRange(0, idx);
+      final before = target.sublist(0, pos);
+      final tail = target.sublist(pos + 1);
+      if (before.isNotEmpty) await source.insertAll(0, before.map(_sourceForItem).toList());
+      if (tail.isNotEmpty) await source.addAll(tail.map(_sourceForItem).toList());
+      queue.add(target);
+      _playNextInsertIndex = null;
+    } catch (e) {
+      appLog('No se pudo reordenar la cola (${e.runtimeType})');
+    } finally {
+      // El índice de la misma canción llega en eventos posteriores.
+      Future.delayed(const Duration(milliseconds: 300), () => _reorderingQueue = false);
+    }
   }
 
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
+    await cancelRepeatCount(restoreMode: false);
     LoopMode mode;
     switch (repeatMode) {
       case AudioServiceRepeatMode.none:
@@ -940,7 +1256,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     // Check if the current queue is exactly the same
     bool isSameQueue = false;
-    final currentQueue = queue.value;
+    final currentQueue = _unshuffledQueue ?? queue.value;
     if (currentQueue.length == validItems.length) {
       isSameQueue = true;
       for (int i = 0; i < currentQueue.length; i++) {
@@ -953,8 +1269,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     if (isSameQueue) {
       // Just seek and play if it's the same playlist
-      if (_player.currentIndex != initialIndex) {
-        await skipToQueueItem(initialIndex);
+      final liveIndex = queue.value.indexWhere((m) => m.id == validItems[initialIndex].id);
+      final jumpTo = liveIndex == -1 ? initialIndex : liveIndex;
+      if (_player.currentIndex != jumpTo) {
+        await skipToQueueItem(jumpTo);
       }
       _startTracking(validItems[initialIndex]);
       if (!_player.playing) {
@@ -967,28 +1285,29 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     // distintas): el bucle no debe sobrevivir el cambio, así que se apaga
     // aquí. La rama `isSameQueue` de arriba no pasa por este punto, así que
     // reanudar la lista que ya sonaba no lo apaga.
+    _repeatCounter.cancel();
+    repeatRemaining.value = 0;
+    _sleepPrevIndex = null;
     if (_player.loopMode != LoopMode.off) {
       await _player.setLoopMode(LoopMode.off);
     }
 
-    queue.add(validItems);
+    final (loadItems, loadIndex) = _orderForLoad(validItems, initialIndex);
+    queue.add(loadItems);
 
-    final sources = validItems.map((item) {
-      final path = item.extras?['filePath'] as String? ?? '';
-      return AudioSource.uri(_sourceUriFor(path), tag: item);
-    }).toList();
+    final sources = loadItems.map(_sourceForItem).toList();
 
     _playlistSource = ConcatenatingAudioSource(children: sources);
 
     // Pass initial index to avoid the need to seek immediately after setAudioSource
     await _player.setAudioSource(
       _playlistSource!,
-      initialIndex: initialIndex,
+      initialIndex: loadIndex,
       initialPosition: Duration.zero,
     );
 
-    mediaItem.add(validItems[initialIndex]);
-    _startTracking(validItems[initialIndex]);
+    mediaItem.add(loadItems[loadIndex]);
+    _startTracking(loadItems[loadIndex]);
     await _player.play();
   }
 
@@ -1023,10 +1342,13 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       _streamErrorReportedFor = null;
       await _finalizePlay();
       _resetTracking();
+      _repeatCounter.cancel();
+      repeatRemaining.value = 0;
       if (_player.loopMode != LoopMode.off) {
         await _player.setLoopMode(LoopMode.off);
       }
 
+      _unshuffledQueue = null;
       queue.add([item]);
       _playlistSource = ConcatenatingAudioSource(children: [
         AudioSource.uri(Uri.parse(info.url), headers: info.httpHeaders, tag: item),
@@ -1070,11 +1392,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     final initialIndex = targetIndex != -1 ? targetIndex : 0;
 
     queue.add(validItems);
+    // La cola guardada ya está en el orden barajado: ese pasa a ser la base.
+    _unshuffledQueue = _handlerShuffle && _desktopShuffle ? List<MediaItem>.of(validItems) : null;
 
-    final sources = validItems.map((item) {
-      final path = item.extras?['filePath'] as String? ?? '';
-      return AudioSource.uri(_sourceUriFor(path), tag: item);
-    }).toList();
+    final sources = validItems.map(_sourceForItem).toList();
 
     _playlistSource = ConcatenatingAudioSource(children: sources);
 
@@ -1108,6 +1429,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       if (currentQueue.any((item) => item.id == mediaItem.id)) return;
 
       queue.add([...currentQueue, mediaItem]);
+      _unshuffledQueue = _unshuffledQueue == null ? null : [..._unshuffledQueue!, mediaItem];
 
       if (_playlistSource != null) {
         try {
@@ -1139,6 +1461,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       if (newItems.isEmpty) return;
 
       queue.add([...currentQueue, ...newItems]);
+      _unshuffledQueue = _unshuffledQueue == null ? null : [..._unshuffledQueue!, ...newItems];
 
       if (_playlistSource != null) {
         try {
@@ -1204,6 +1527,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
       final newQueue = List<MediaItem>.from(currentQueue)..insert(target, item);
       queue.add(newQueue);
+      _unshuffledQueue = _unshuffledQueue == null ? null : [..._unshuffledQueue!, item];
 
       try {
         await _playlistSource!.insert(target, AudioSource.uri(_sourceUriFor(path), tag: item));
@@ -1226,6 +1550,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     final newQueue = List<MediaItem>.from(currentQueue)..removeAt(index);
     queue.add(newQueue);
+    _unshuffledQueue = _unshuffledQueue?.where((m) => m.id != mediaItem.id).toList();
 
     if (_playlistSource != null && index < _playlistSource!.length) {
       await _playlistSource!.removeAt(index);
@@ -1291,6 +1616,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     // sobre un reproductor sin fuente cargada. hasLoadedSource (ver abajo) detecta
     // y corrige esto igual si el proceso muere del todo y este callback ni corre.
     _playlistSource = null;
+    _unshuffledQueue = null;
     queue.add([]);
     mediaItem.add(null);
     await super.onTaskRemoved();
@@ -1312,6 +1638,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       _cancelStreamQueue();
       await _player.stop();
       _playlistSource = null;
+      _unshuffledQueue = null;
       queue.add([]);
       mediaItem.add(null);
       await Future.delayed(const Duration(milliseconds: 200));
@@ -1372,6 +1699,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       
       // 2. Limpiar estados
       _playlistSource = null;
+      _unshuffledQueue = null;
       queue.add([]);
       mediaItem.add(null);
       

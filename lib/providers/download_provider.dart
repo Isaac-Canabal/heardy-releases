@@ -9,6 +9,11 @@ import '../services/download_service.dart';
 import '../services/download_source.dart';
 import '../services/spotify_match.dart' show maxMatchToleranceSeconds, pickClosestByDuration;
 
+/// Destino centinela de `download_queue.playlistId` para canciones sueltas:
+/// no es una playlist, el worker las descarga sin playlist y caen en la
+/// Bandeja. Evita cambiar el esquema (la columna es NOT NULL).
+const String inboxDownloadTarget = '__inbox__';
+
 /// Un trabajo pendiente, tal como lo ve la UI.
 class DownloadJob {
   final int queueId;
@@ -617,7 +622,8 @@ class DownloadProvider extends ChangeNotifier {
     // La playlist destino puede haber desaparecido mientras el trabajo
     // esperaba: la cola no tiene FK a propósito, para que eso falle como un
     // trabajo y no se lleve la tanda por delante en cascada.
-    if (await _db.getPlaylistById(job.playlistId) == null) {
+    final toInbox = job.playlistId == inboxDownloadTarget;
+    if (!toInbox && await _db.getPlaylistById(job.playlistId) == null) {
       await _db.removeFromDownloadQueue(job.queueId);
       _retryAfter.remove(job.queueId);
       _recordFailure(job, 'La playlist de destino ya no existe.', code: 'E-DL-PLAYLIST', permanent: true);
@@ -627,7 +633,7 @@ class DownloadProvider extends ChangeNotifier {
     try {
       final result = await _service.download(
         job.toRemoteTrack(),
-        playlistId: job.playlistId,
+        playlistId: toInbox ? null : job.playlistId,
         resolveFirst: !job.metadataComplete,
         onResolved: (resolved) async {
           // Se persiste ANTES de bajar un byte: si la descarga falla y el

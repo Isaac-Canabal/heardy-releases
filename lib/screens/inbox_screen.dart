@@ -12,6 +12,7 @@ import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
 import '../services/friendly_error.dart';
+import 'cloud_library_screen.dart';
 
 /// Batch triage for songs imported loose in the library root, with no
 /// playlist assigned yet (D6). Never a per-song dialog — select as many as
@@ -280,6 +281,19 @@ class _InboxScreenState extends State<InboxScreen> {
                   onTap: _scanning ? null : _scan,
                 ),
               ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 0),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                icon: const Icon(Icons.devices_rounded, size: 18),
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute(builder: (_) => const CloudLibraryScreen())),
+                label: Text(l10n.cloudLibInboxRow),
+              ),
             ),
           ),
           if (libraryRootUri != null && !_loading)

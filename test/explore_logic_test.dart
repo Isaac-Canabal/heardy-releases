@@ -273,6 +273,63 @@ void main() {
       expect(nowPlayingAddAction(const MediaItem(id: '', title: 't')), NowPlayingAddAction.none);
     });
   });
+
+  group('personalizar Explorar', () {
+    test('parseHiddenShelves ignora nombres desconocidos y repetidos', () {
+      expect(parseHiddenShelves(null), isEmpty);
+      expect(
+        parseHiddenShelves(['charts', 'nope', 'charts', 'moods']),
+        {ExploreShelfId.charts, ExploreShelfId.moods},
+      );
+    });
+
+    test('serializeHiddenShelves es estable y ida y vuelta', () {
+      final hidden = {ExploreShelfId.moods, ExploreShelfId.recent};
+      final raw = serializeHiddenShelves(hidden);
+      expect(raw, ['recent', 'moods']);
+      expect(parseHiddenShelves(raw), hidden);
+    });
+
+    test('las estanterías regionales son las de país', () {
+      expect(kRegionalShelves, {
+        ExploreShelfId.charts,
+        ExploreShelfId.newReleases,
+        ExploreShelfId.home,
+        ExploreShelfId.moods,
+      });
+      expect(isRegionalShelf(ExploreShelfId.radio), isFalse);
+      expect(isRegionalShelf(ExploreShelfId.charts), isTrue);
+    });
+
+    test('normalizeExploreCountry acepta sólo códigos de la lista', () {
+      expect(normalizeExploreCountry('mx'), 'MX');
+      expect(normalizeExploreCountry(' ES '), 'ES');
+      expect(normalizeExploreCountry('ZZ'), isNull);
+      expect(normalizeExploreCountry(''), isNull);
+      expect(normalizeExploreCountry(null), isNull);
+    });
+
+    test('la lista de países no repite códigos y está ordenada por nombre', () {
+      final codes = kExploreCountries.map((c) => c.code).toList();
+      expect(codes.toSet(), hasLength(codes.length));
+      expect(codes.every((c) => c.length == 2 && c == c.toUpperCase()), isTrue);
+      expect(codes, containsAll(['ES', 'MX', 'US', 'AR', 'CO']));
+      for (final english in [false, true]) {
+        final names = sortedExploreCountries(english: english).map((c) => c.nameFor(english: english)).toList();
+        final sorted = [...names]..sort((a, b) => foldForSearch(a).compareTo(foldForSearch(b)));
+        expect(names, sorted);
+      }
+    });
+
+    test('filterExploreCountries busca por nombre sin acentos ni mayúsculas, o por código', () {
+      expect(filterExploreCountries('mexi', english: false).map((c) => c.code), ['MX']);
+      expect(filterExploreCountries('MÉXICO', english: false).map((c) => c.code), ['MX']);
+      expect(filterExploreCountries('germany', english: true).map((c) => c.code), ['DE']);
+      expect(filterExploreCountries('es', english: false).map((c) => c.code), contains('ES'));
+      expect(filterExploreCountries('  ', english: false), hasLength(kExploreCountries.length));
+      expect(filterExploreCountries('xyzxyz', english: false), isEmpty);
+    });
+  });
 }
 
 class _HangingResolver implements StreamResolver {

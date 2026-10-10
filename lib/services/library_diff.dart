@@ -10,6 +10,7 @@
 library;
 
 import 'cover_art.dart' show youtubeVideoIdFrom;
+import 'download_source.dart' show RemoteTrack;
 
 /// Enlaces de origen que este equipo ya tiene: los `sourceUrl` locales más los
 /// de las filas de la nube cuyo audio ya está acá por hash (el escáner no
@@ -84,6 +85,43 @@ List<Map<String, dynamic>> missingCloudSongs(
     // Un mismo audio con dos filas en la nube falta una sola vez.
     return !localFileHashes.contains(hash) && seen.add(hash);
   }).toList();
+}
+
+/// Lo que la nube tiene y este equipo no: [missingCloudSongs] contra TODOS los
+/// hashes locales (también los de filas `missing`, que siguen siendo "tuyas"),
+/// menos lo que ya se conoce por el id de vídeo de su `sourceUrl` (un archivo
+/// escaneado sin hash en común pero del mismo vídeo).
+List<Map<String, dynamic>> cloudOnlySongs(
+  List<Map<String, dynamic>> cloudSongs, {
+  required Set<String> localFileHashes,
+  Set<String> localSourceUrls = const {},
+}) {
+  final known = knownLocalSourceUrls(
+    localSourceUrls: localSourceUrls,
+    cloudSongs: cloudSongs,
+    localFileHashes: localFileHashes,
+  );
+  return [
+    for (final song in missingCloudSongs(cloudSongs, localFileHashes))
+      if (!sourceUrlAlreadyKnown((song['sourceUrl'] as String?) ?? '', known)) song,
+  ];
+}
+
+/// El trabajo de descarga de una fila de la nube, o `null` si no tiene
+/// `sourceUrl` (entonces sólo se puede emparejar por duración, ver
+/// `matchCloudSong`). Es un listado plano: el worker lo re-resuelve.
+RemoteTrack? remoteTrackFromCloudSong(Map<String, dynamic> song) {
+  final url = ((song['sourceUrl'] as String?) ?? '').trim();
+  if (url.isEmpty) return null;
+  return RemoteTrack(
+    id: youtubeVideoIdFrom(url) ?? url,
+    title: (song['title'] as String?) ?? '',
+    artist: (song['artist'] as String?) ?? '',
+    album: (song['album'] as String?)?.isEmpty ?? true ? null : song['album'] as String,
+    durationSeconds: (song['durationSeconds'] as num?)?.toInt() ?? 0,
+    thumbnailUrl: '',
+    sourceUrl: url,
+  );
 }
 
 /// Clave natural de una playlist: el nombre sin mayúsculas ni espacios de más

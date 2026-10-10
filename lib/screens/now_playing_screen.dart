@@ -1,22 +1,30 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../services/audio_player_handler.dart';
+import '../services/cover_color.dart';
 import '../services/explore_logic.dart';
+import '../services/playback_speed_logic.dart';
+import '../services/sleep_timer_logic.dart';
 import '../widgets/add_current_track.dart';
+import '../services/lyrics_logic.dart';
 import '../services/lyrics_service.dart';
 import '../services/translation_service.dart';
 import '../providers/settings_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/max_width_center.dart';
+import '../widgets/playback_options_sheet.dart';
 import '../l10n/app_localizations.dart';
 import '../services/app_log.dart';
 import '../services/stream_queue_logic.dart';
+import '../services/waveform_defaults.dart';
+import '../widgets/waveform_seek_bar.dart';
 
 const Color kNowPlayingFallbackColor = Color(0xFF1E1E1E);
 
@@ -62,7 +70,12 @@ class NowPlayingScreen extends StatefulWidget {
 
 class _NowPlayingScreenState extends State<NowPlayingScreen> {
   MediaItem? _currentMediaItem;
-  Color _dominantColor = kNowPlayingFallbackColor;
+  Color? _coverAccent;
+
+  Color get _dominantColor =>
+      context.read<SettingsProvider>().dynamicNowPlayingColor
+          ? (_coverAccent ?? AppTheme.primary)
+          : AppTheme.primary;
 
   Future<void> _addCurrent(MediaItem item) =>
       addCurrentTrackToPlaylist(context, item, isMounted: () => mounted);
@@ -79,13 +92,14 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     // solapamiento.
     await Future.delayed(const Duration(milliseconds: 320));
     if (!mounted) return;
-    final color = await dominantColorForArt(artPath);
-    if (mounted) setState(() => _dominantColor = color);
+    final color = await coverAccentColor(artPath);
+    if (mounted) setState(() => _coverAccent = color);
   }
 
   @override
   Widget build(BuildContext context) {
     final audioHandler = Provider.of<AudioPlayerHandler>(context);
+    context.watch<SettingsProvider>();
     final l10n = AppLocalizations.of(context)!;
 
     return Scaffold(
@@ -150,7 +164,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   final isActive =
                       isShuffleActive ||
                       isRepeatActive ||
-                      sleepSnapshot.data != null;
+                      sleepSnapshot.data != null ||
+                      audioHandler.sleepTracksRemaining.value != null ||
+                      !isDefaultPlayback(
+                        audioHandler.player.speed,
+                        audioHandler.player.pitch,
+                      );
 
                   return IconButton(
                     icon: Stack(
@@ -394,21 +413,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         ),
 
                         // 4. Seek Bar
-                        StreamBuilder<Duration>(
-                          stream: audioHandler.player.positionStream,
-                          builder: (context, posSnapshot) {
-                            final position = posSnapshot.data ?? Duration.zero;
-                            final duration =
-                                mediaItem.duration ?? Duration.zero;
-
-                            return SeekBar(
-                              position: position,
-                              duration: duration,
-                              onChangeEnd: (newPosition) {
-                                audioHandler.seek(newPosition);
-                              },
-                            );
-                          },
+                        _WaveformSeekSection(
+                          mediaItem: mediaItem,
+                          audioHandler: audioHandler,
                         ),
 
                         // 5. Central Playback Controls
@@ -646,12 +653,82 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   );
                 },
               ),
+              ListTile(
+                leading: const Icon(Icons.repeat_one, color: Colors.white54),
+                title: Text(
+                  l10n.repeatCountTitle,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                subtitle: ValueListenableBuilder<int>(
+                  valueListenable: audioHandler.repeatRemaining,
+                  builder: (context, remaining, _) => Text(
+                    remaining > 0
+                        ? l10n.repeatCountRemaining(remaining)
+                        : l10n.repeatCountBody,
+                    style: TextStyle(
+                      color: remaining > 0
+                          ? const Color(0xFF8C9EFF)
+                          : Colors.white38,
+                    ),
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showRepeatCountSheet(this.context, audioHandler);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.speed, color: Colors.white54),
+                title: Text(
+                  l10n.playbackSpeedTitle,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                trailing: StreamBuilder<double>(
+                  stream: audioHandler.player.speedStream,
+                  initialData: audioHandler.player.speed,
+                  builder: (context, snap) => Text(
+                    playbackRateLabel(snap.data ?? 1.0),
+                    style: const TextStyle(color: Colors.white54),
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  showPlaybackSpeedSheet(this.context, audioHandler);
+                },
+              ),
               const Divider(color: Colors.white24, height: 1),
+              ValueListenableBuilder<int?>(
+                valueListenable: audioHandler.sleepTracksRemaining,
+                builder: (context, tracksLeft, _) {
+                  if (tracksLeft == null) return const SizedBox.shrink();
+                  return ListTile(
+                    leading: const Icon(
+                      Icons.bedtime,
+                      color: Color(0xFF8C9EFF),
+                    ),
+                    title: Text(
+                      l10n.nowPlayingSleepTimerTitle,
+                      style: const TextStyle(color: Colors.white),
+                    ),
+                    subtitle: Text(
+                      l10n.sleepTracksRemaining(tracksLeft),
+                      style: const TextStyle(color: Colors.white54),
+                    ),
+                    trailing: TextButton(
+                      onPressed: () => audioHandler.cancelSleepTimer(),
+                      child: Text(l10n.commonCancel),
+                    ),
+                  );
+                },
+              ),
               StreamBuilder<Duration?>(
                 stream: audioHandler.sleepTimerStream,
                 initialData: audioHandler.sleepTimerRemainingNow,
                 builder: (context, snapshot) {
                   final remaining = snapshot.data;
+                  if (audioHandler.sleepTracksRemaining.value != null) {
+                    return const SizedBox.shrink();
+                  }
                   if (remaining != null) {
                     return ListTile(
                       leading: const Icon(
@@ -827,6 +904,30 @@ void showSleepTimerPicker(
                   ),
                 ],
               ),
+              const SizedBox(height: 20),
+              Text(
+                l10n.sleepAfterTracksSection,
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final n in const [1, 2, 3, 5, 10])
+                    ActionChip(
+                      label: Text(
+                        l10n.sleepTracksChip(clampSleepTracks(n)),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      backgroundColor: Colors.white.withValues(alpha: 0.08),
+                      onPressed: () {
+                        audioHandler.startSleepAfterTracks(n);
+                        Navigator.of(sheetContext).pop();
+                      },
+                    ),
+                ],
+              ),
             ],
           ),
         ),
@@ -955,6 +1056,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
   final ScrollController _scrollController = ScrollController();
   final List<GlobalKey> _lyricKeys = [];
   StreamSubscription<Duration>? _positionSub;
+  final ValueNotifier<Duration> _wordPosition = ValueNotifier(Duration.zero);
   bool _userScrolling = false;
   DateTime _lastScrollTime = DateTime.now();
 
@@ -993,6 +1095,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
   }
 
   void _onPosition(Duration position) {
+    _wordPosition.value = position;
     if (_parsedLines.isEmpty) return;
     int newActiveIndex = -1;
     for (int i = 0; i < _parsedLines.length; i++) {
@@ -1018,7 +1121,43 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
     _positionSub?.cancel();
     _mediaItemSub?.cancel();
     _scrollController.dispose();
+    _wordPosition.dispose();
     super.dispose();
+  }
+
+  Widget _buildLineText(int index, LyricLine line, bool isActive) {
+    if (!isActive || line.words.isEmpty) {
+      return Text(line.text, textAlign: TextAlign.left);
+    }
+    final lineEnd =
+        line.wordsEnd ??
+        (index + 1 < _parsedLines.length
+            ? _parsedLines[index + 1].time
+            : line.words.last.start + const Duration(seconds: 4));
+    return ValueListenableBuilder<Duration>(
+      valueListenable: _wordPosition,
+      builder: (context, position, _) {
+        final p = wordProgressAt(line.words, lineEnd, position);
+        return Text.rich(
+          TextSpan(
+            children: [
+              for (var i = 0; i < line.words.length; i++)
+                TextSpan(
+                  text: line.words[i].text,
+                  style: TextStyle(
+                    color: i < p.index
+                        ? Colors.white
+                        : i == p.index
+                        ? Color.lerp(Colors.white38, Colors.white, p.progress)
+                        : Colors.white38,
+                  ),
+                ),
+            ],
+          ),
+          textAlign: TextAlign.left,
+        );
+      },
+    );
   }
 
   void _fetchLyrics({bool reTranslateAfter = false}) async {
@@ -1315,7 +1454,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(line.text, textAlign: TextAlign.left),
+                                _buildLineText(index, line, isActive),
                                 if (_showTranslation &&
                                     _translatedLines != null &&
                                     index < _translatedLines!.length &&
@@ -1729,6 +1868,66 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
   }
 }
 
+/// Seek bar de Reproduciendo: carga la onda en segundo plano (Android, pistas
+/// locales) y mientras tanto, o si falla, queda el Slider.
+class _WaveformSeekSection extends StatefulWidget {
+  final MediaItem mediaItem;
+  final AudioPlayerHandler audioHandler;
+
+  const _WaveformSeekSection({
+    required this.mediaItem,
+    required this.audioHandler,
+  });
+
+  @override
+  State<_WaveformSeekSection> createState() => _WaveformSeekSectionState();
+}
+
+class _WaveformSeekSectionState extends State<_WaveformSeekSection> {
+  Uint8List? _peaks;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _WaveformSeekSection old) {
+    super.didUpdateWidget(old);
+    if (old.mediaItem.id != widget.mediaItem.id) {
+      _peaks = null;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final item = widget.mediaItem;
+    final path = item.extras?['filePath'] as String? ?? '';
+    final isStream = item.extras?['isStream'] == true;
+    final repo = defaultWaveformRepository();
+    if (repo == null || isStream || path.isEmpty) return;
+    final peaks = await repo.load(item.id, path);
+    if (!mounted || widget.mediaItem.id != item.id || peaks == null) return;
+    setState(() => _peaks = peaks);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<Duration>(
+      stream: widget.audioHandler.player.positionStream,
+      builder: (context, posSnapshot) {
+        return SeekBar(
+          position: posSnapshot.data ?? Duration.zero,
+          duration: widget.mediaItem.duration ?? Duration.zero,
+          peaks: _peaks,
+          onChangeEnd: (newPosition) => widget.audioHandler.seek(newPosition),
+        );
+      },
+    );
+  }
+}
+
 // --- SEEK BAR ---
 // Collapsed from a WaveformSeekBar (D7, Stage 5 prune): AudioAnalysisService
 // never did real waveform extraction (it derived fake bar heights from
@@ -1745,12 +1944,16 @@ class SeekBar extends StatefulWidget {
   /// del slider, en una sola fila, en vez de debajo.
   final bool inline;
 
+  /// Onda ya cargada; si es null se muestra el Slider de siempre.
+  final Uint8List? peaks;
+
   const SeekBar({
     super.key,
     required this.position,
     required this.duration,
     required this.onChangeEnd,
     this.inline = false,
+    this.peaks,
   });
 
   @override
@@ -1773,28 +1976,26 @@ class _SeekBarState extends State<SeekBar> {
     final value = (_dragValue ?? widget.position.inMilliseconds.toDouble())
         .clamp(0.0, hasDuration ? maxMs : 1.0);
 
-    final slider = SliderTheme(
-      data: SliderTheme.of(context).copyWith(
-        trackHeight: 4,
-        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-        overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-        activeTrackColor: const Color(0xFF8C9EFF),
-        inactiveTrackColor: Colors.white10,
-        thumbColor: const Color(0xFF8C9EFF),
-      ),
-      child: Slider(
-        min: 0,
-        max: hasDuration ? maxMs : 1,
-        value: hasDuration ? value : 0,
-        onChanged: hasDuration ? (v) => setState(() => _dragValue = v) : null,
-        onChangeEnd: hasDuration
-            ? (v) {
-                widget.onChangeEnd(Duration(milliseconds: v.toInt()));
-                setState(() => _dragValue = null);
-              }
-            : null,
-      ),
-    );
+    final peaks = widget.peaks;
+    final l10n = AppLocalizations.of(context)!;
+    final Widget slider = (peaks != null && peaks.isNotEmpty && hasDuration)
+        ? WaveformSeekBar(
+            peaks: peaks,
+            position: widget.position,
+            duration: widget.duration,
+            onSeek: widget.onChangeEnd,
+            onScrub: (d) => setState(
+              () => _dragValue = d?.inMilliseconds.toDouble(),
+            ),
+            activeColor: const Color(0xFF8C9EFF),
+            inactiveColor: Colors.white24,
+            semanticsLabel: l10n.nowPlayingSeekLabel,
+            semanticsValue: l10n.nowPlayingSeekValue(
+              _formatDuration(widget.position),
+              _formatDuration(widget.duration),
+            ),
+          )
+        : _buildSlider(context, maxMs, hasDuration, value);
     const timeStyle = TextStyle(color: Colors.white54, fontSize: 12);
     // Mientras se arrastra, el tiempo de la izquierda sigue al pulgar — si
     // no, la barra en línea (donde el número está pegado al slider) parece
@@ -1831,18 +2032,42 @@ class _SeekBarState extends State<SeekBar> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                _formatDuration(widget.position),
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              Text(
-                _formatDuration(widget.duration),
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
-              ),
+              Text(_formatDuration(shownPosition), style: timeStyle),
+              Text(_formatDuration(widget.duration), style: timeStyle),
             ],
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSlider(
+    BuildContext context,
+    double maxMs,
+    bool hasDuration,
+    double value,
+  ) {
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 4,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+        activeTrackColor: const Color(0xFF8C9EFF),
+        inactiveTrackColor: Colors.white10,
+        thumbColor: const Color(0xFF8C9EFF),
+      ),
+      child: Slider(
+        min: 0,
+        max: hasDuration ? maxMs : 1,
+        value: hasDuration ? value : 0,
+        onChanged: hasDuration ? (v) => setState(() => _dragValue = v) : null,
+        onChangeEnd: hasDuration
+            ? (v) {
+                widget.onChangeEnd(Duration(milliseconds: v.toInt()));
+                setState(() => _dragValue = null);
+              }
+            : null,
+      ),
     );
   }
 }

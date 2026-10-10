@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/explore_logic.dart';
 import '../services/official_server.dart';
 import '../l10n/app_localizations.dart';
 
@@ -25,8 +26,14 @@ class SettingsProvider with ChangeNotifier {
   static const _customCombinedKey = 'custom_theme_combined';
   static const _accountPromptSeenKey = 'account_prompt_seen';
   static const _shareNowPlayingKey = 'share_now_playing';
+  static const _dynamicNowPlayingColorKey = 'dynamic_now_playing_color';
+  static const normalizeVolumeKey = 'normalize_volume';
+  static const skipSilenceKey = 'skip_silence';
+  static const trackFadeKey = 'track_fade';
   static const _legalAcceptedVersionKey = 'legal_accepted_version';
   static const _legalAcceptedAtKey = 'legal_accepted_at';
+  static const _exploreHiddenKey = 'explore_hidden_shelves';
+  static const _exploreCountryKey = 'explore_country';
 
   AppThemePreset _preset = AppThemePreset.navy;
   bool _loaded = false;
@@ -42,7 +49,13 @@ class SettingsProvider with ChangeNotifier {
   bool _customCombined = true;
   bool _accountPromptSeen = false;
   bool _shareNowPlaying = false;
+  bool _dynamicNowPlayingColor = true;
+  bool _normalizeVolume = false;
+  bool _skipSilence = false;
+  bool _trackFade = false;
   String? _legalAcceptedVersion;
+  Set<ExploreShelfId> _exploreHidden = {};
+  String? _exploreCountry;
 
   AppThemePreset get preset => _preset;
   bool get isLoaded => _loaded;
@@ -54,6 +67,16 @@ class SettingsProvider with ChangeNotifier {
   bool get customCombined => _customCombined;
   bool get accountPromptSeen => _accountPromptSeen;
   bool get shareNowPlaying => _shareNowPlaying;
+  bool get dynamicNowPlayingColor => _dynamicNowPlayingColor;
+  bool get normalizeVolume => _normalizeVolume;
+  bool get skipSilence => _skipSilence;
+  bool get trackFade => _trackFade;
+
+  /// Secciones de Explorar que el usuario ocultó; no se piden al servidor.
+  Set<ExploreShelfId> get exploreHiddenShelves => Set.unmodifiable(_exploreHidden);
+
+  /// País elegido para las listas regionales de Explorar; null = el del dispositivo.
+  String? get exploreCountry => _exploreCountry;
 
   /// Versión de los textos legales que el usuario aceptó en esta instalación;
   /// `null` si nunca. Ver legal_texts.dart.
@@ -122,7 +145,13 @@ class SettingsProvider with ChangeNotifier {
     _customCombined = prefs.getBool(_customCombinedKey) ?? true;
     _accountPromptSeen = prefs.getBool(_accountPromptSeenKey) ?? false;
     _shareNowPlaying = prefs.getBool(_shareNowPlayingKey) ?? false;
+    _dynamicNowPlayingColor = prefs.getBool(_dynamicNowPlayingColorKey) ?? true;
+    _normalizeVolume = prefs.getBool(normalizeVolumeKey) ?? false;
+    _skipSilence = prefs.getBool(skipSilenceKey) ?? false;
+    _trackFade = prefs.getBool(trackFadeKey) ?? false;
     _legalAcceptedVersion = prefs.getString(_legalAcceptedVersionKey);
+    _exploreHidden = parseHiddenShelves(prefs.getStringList(_exploreHiddenKey));
+    _exploreCountry = normalizeExploreCountry(prefs.getString(_exploreCountryKey));
     _loaded = true;
     notifyListeners();
   }
@@ -147,11 +176,66 @@ class SettingsProvider with ChangeNotifier {
     await prefs.setString(_legalAcceptedAtKey, DateTime.now().toIso8601String());
   }
 
+  Future<void> setExploreShelfHidden(ExploreShelfId id, bool hidden) async {
+    final next = {..._exploreHidden};
+    if (hidden ? !next.add(id) : !next.remove(id)) return;
+    await _saveExploreHidden(next);
+  }
+
+  Future<void> showAllExploreShelves() => _saveExploreHidden({});
+
+  Future<void> _saveExploreHidden(Set<ExploreShelfId> hidden) async {
+    _exploreHidden = hidden;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_exploreHiddenKey, serializeHiddenShelves(hidden));
+  }
+
+  Future<void> setExploreCountry(String? code) async {
+    _exploreCountry = normalizeExploreCountry(code);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    final c = _exploreCountry;
+    if (c == null) {
+      await prefs.remove(_exploreCountryKey);
+    } else {
+      await prefs.setString(_exploreCountryKey, c);
+    }
+  }
+
   Future<void> setShareNowPlaying(bool enabled) async {
     _shareNowPlaying = enabled;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_shareNowPlayingKey, enabled);
+  }
+
+  Future<void> setDynamicNowPlayingColor(bool enabled) async {
+    _dynamicNowPlayingColor = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_dynamicNowPlayingColorKey, enabled);
+  }
+
+  Future<void> setNormalizeVolume(bool enabled) async {
+    _normalizeVolume = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(normalizeVolumeKey, enabled);
+  }
+
+  Future<void> setSkipSilence(bool enabled) async {
+    _skipSilence = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(skipSilenceKey, enabled);
+  }
+
+  Future<void> setTrackFade(bool enabled) async {
+    _trackFade = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(trackFadeKey, enabled);
   }
 
   Future<void> setPreset(AppThemePreset preset) async {

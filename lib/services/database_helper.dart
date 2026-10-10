@@ -7,6 +7,7 @@ import '../models/history_entry.dart';
 import 'explore_logic.dart' show youtubeVideoId;
 import 'history_logic.dart' show maxStreamHistoryRows;
 import 'library_storage.dart';
+import 'smart_lists.dart';
 import 'app_log.dart';
 
 class DatabaseHelper {
@@ -391,6 +392,17 @@ class DatabaseHelper {
   Future<int> updateSongArtPath(String id, String artPath) async {
     final db = await database;
     return db.update('songs', {'artPath': artPath}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Rellena `sourceUrl` sólo si la fila no tiene ninguno: nunca pisa uno existente.
+  Future<int> fillSongSourceUrlIfEmpty(String id, String sourceUrl) async {
+    final db = await database;
+    return db.update(
+      'songs',
+      {'sourceUrl': sourceUrl},
+      where: "id = ? AND (sourceUrl IS NULL OR sourceUrl = '')",
+      whereArgs: [id],
+    );
   }
 
   /// Marks every previously-imported song (uri IS NOT NULL) as missing.
@@ -1121,6 +1133,30 @@ class DatabaseHelper {
     return rows.map(Song.fromMap).toList();
   }
 
+  /// Todas las canciones presentes con su número de reproducciones y la última
+  /// fecha, sin filtrar: las listas inteligentes se derivan de esto con
+  /// `buildSmartList`.
+  Future<List<SongPlayStat>> getSongPlayStats() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT s.*, COALESCE(h.playCount, 0) AS playCount, h.lastPlayed AS lastPlayed
+      FROM songs s
+      LEFT JOIN (
+        SELECT songId, COUNT(*) AS playCount, MAX(playDate) AS lastPlayed
+        FROM play_history GROUP BY songId
+      ) h ON h.songId = s.id
+      WHERE s.missing = 0
+    ''');
+    return [
+      for (final r in rows)
+        SongPlayStat(
+          song: Song.fromMap(r),
+          playCount: r['playCount'] as int,
+          lastPlayed: DateTime.tryParse((r['lastPlayed'] as String?) ?? ''),
+        ),
+    ];
+  }
+
   /// `sourceUrl` de YouTube de las canciones más reproducidas (todo el
   /// historial): semillas de la radio de Explorar. El filtro fino por id válido
   /// lo hace `selectRadioSeedIds`; aquí sólo se descartan las que no son de
@@ -1164,6 +1200,26 @@ class DatabaseHelper {
       "SELECT fileHash FROM songs WHERE missing = 0 AND fileHash IS NOT NULL AND fileHash != ''",
     );
     return rows.map((r) => r['fileHash'] as String).toSet();
+  }
+
+  /// Como [getLocalFileHashes] pero también incluye las filas `missing = 1`:
+  /// una canción cuyo archivo no se ve ahora mismo sigue siendo "tuya", así
+  /// que no debe ofrecerse como descargable desde otros dispositivos.
+  Future<Set<String>> getAllLocalFileHashes() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      "SELECT fileHash FROM songs WHERE fileHash IS NOT NULL AND fileHash != ''",
+    );
+    return rows.map((r) => r['fileHash'] as String).toSet();
+  }
+
+  /// Como [getLocalSourceUrls] pero incluyendo las filas `missing = 1`.
+  Future<Set<String>> getAllLocalSourceUrls() async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      "SELECT sourceUrl FROM songs WHERE sourceUrl IS NOT NULL AND sourceUrl != ''",
+    );
+    return rows.map((r) => r['sourceUrl'] as String).toSet();
   }
 
   /// Todos los `sourceUrl` no vacíos de canciones presentes — para que

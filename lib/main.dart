@@ -22,6 +22,7 @@ import 'services/audio_player_handler.dart';
 import 'services/cloud_source.dart';
 import 'services/download_service.dart';
 import 'services/download_source.dart';
+import 'models/explore.dart' show deviceExploreCountry;
 import 'services/explore_logic.dart';
 import 'services/heardy_cloud_source.dart';
 import 'services/official_server.dart';
@@ -31,6 +32,7 @@ import 'services/ytdlp_local_stream_resolver.dart';
 import 'services/ytdlp_server_source.dart';
 import 'services/system_notifications.dart';
 import 'providers/auth_provider.dart';
+import 'providers/cloud_library_provider.dart';
 import 'providers/download_provider.dart';
 import 'providers/explore_provider.dart';
 import 'providers/music_provider.dart';
@@ -274,10 +276,12 @@ void main() async {
     // DownloadProvider tenga que conocer a MusicProvider.
     onDownloadComplete: (playlistId) async {
       await musicProvider.loadPlaylists();
-      await musicProvider.loadSongsForPlaylist(
-        playlistId,
-        updateCurrent: musicProvider.currentPlaylistId == playlistId,
-      );
+      if (playlistId != inboxDownloadTarget) {
+        await musicProvider.loadSongsForPlaylist(
+          playlistId,
+          updateCurrent: musicProvider.currentPlaylistId == playlistId,
+        );
+      }
       await musicProvider.refreshInboxCount();
       musicProvider.notifyLibraryChanged();
     },
@@ -329,7 +333,20 @@ void main() async {
         ChangeNotifierProvider.value(value: syncProvider),
         ChangeNotifierProvider.value(value: notificationsProvider),
         ChangeNotifierProvider.value(value: audioEffectsService),
-        ChangeNotifierProvider(create: (_) => ExploreProvider(source: downloadSource)),
+        ChangeNotifierProvider(
+          create: (_) => ExploreProvider(
+            source: downloadSource,
+            country: () => settingsProvider.exploreCountry ?? deviceExploreCountry(),
+            hiddenShelves: () => settingsProvider.exploreHiddenShelves,
+          ),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => CloudLibraryProvider(
+            cloud: cloudSource,
+            downloads: downloadProvider,
+            source: downloadSource,
+          ),
+        ),
       ],
       child: const HeardyApp(),
     ),
@@ -349,11 +366,7 @@ void main() async {
     // arranque en frío es una oportunidad razonable de comprobar si ya volvió
     // y resolver solo lo que quedó en la lista de espera.
     downloadProvider.retryPendingImports();
-    // Nunca `await`ado: un refresco de token de Firebase en el camino de
-    // arranque no puede retrasar el primer fotograma ni la restauración de
-    // la reproducción. Sin sesión, syncNow() falla con `unauthorized`
-    // (capturado dentro del propio provider) y no hace nada más.
-    syncProvider.syncNow();
+    // La sincronización con la nube es solo manual (Ajustes > Sincronizar ahora).
     // Igual que syncNow(): nunca await'ado, y sin sesión simplemente no
     // encuentra solicitudes de amistad (ver NotificationsProvider).
     notificationsProvider.refresh();

@@ -42,7 +42,6 @@ class SyncProvider with ChangeNotifier {
   int _libraryVersion = 0;
   String? _lastPushedContentHash;
   bool _hashLoadedFromPrefs = false;
-  DateTime? _lastResumeSync;
 
   /// Cursor de la última página COMPLETA de `GET /history` ya bajada — nunca
   /// el de una página corta, que el servidor no la devuelve (ver
@@ -73,17 +72,6 @@ class SyncProvider with ChangeNotifier {
   /// Sube cada vez que una bajada insertó filas: la UI de estadísticas lo
   /// observa para recalcular.
   int get historyRevision => _historyRevision;
-
-  DateTime? _lastAttemptAt;
-  static const _staleSyncThrottle = Duration(minutes: 2);
-
-  /// Sincroniza si el último intento fue hace más de 2 minutos; pensado para
-  /// señales de pantalla (abrir Estadísticas), nunca para un temporizador.
-  Future<void> syncIfStale() async {
-    final last = _lastAttemptAt;
-    if (_isSyncing || (last != null && DateTime.now().difference(last) < _staleSyncThrottle)) return;
-    await syncNow();
-  }
 
   // --- "Escuchando ahora" (F8) ---
   final bool Function() _shareEnabled;
@@ -153,18 +141,6 @@ class SyncProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Estrangula `resumed`: se dispara al volver de segundo plano, pero no si
-  /// ya se sincronizó hace menos de 15 minutos — `resumed` ocurre cada vez
-  /// que se vuelve de WhatsApp, no cada vez que hace falta revisar la nube.
-  static const _resumeThrottle = Duration(minutes: 15);
-
-  Future<void> onAppResumed() async {
-    final last = _lastResumeSync;
-    if (last != null && DateTime.now().difference(last) < _resumeThrottle) return;
-    _lastResumeSync = DateTime.now();
-    await syncNow();
-  }
-
   /// Orden de una pasada: `GET /account` → subir historial pendiente en
   /// lotes de ≤500 → bajar el historial nuevo que otros dispositivos hayan
   /// subido desde el cursor guardado → si el contenido cambió, `PUT /library`.
@@ -195,7 +171,6 @@ class SyncProvider with ChangeNotifier {
   Future<void> syncNow({bool fullHistory = false}) async {
     if (_isSyncing) return;
     _isSyncing = true;
-    _lastAttemptAt = DateTime.now();
     _lastError = null;
     _stepFailures.clear();
     notifyListeners();

@@ -10,6 +10,184 @@ import '../models/song.dart';
 import 'download_source.dart';
 import 'stream_resolver.dart';
 
+enum ExploreShelfId { recent, artists, radio, charts, newReleases, home, moods }
+
+/// Las estanterías que dependen del país; el resto (historial, radio) no.
+const Set<ExploreShelfId> kRegionalShelves = {
+  ExploreShelfId.charts,
+  ExploreShelfId.newReleases,
+  ExploreShelfId.home,
+  ExploreShelfId.moods,
+};
+
+bool isRegionalShelf(ExploreShelfId id) => kRegionalShelves.contains(id);
+
+/// Lee los nombres guardados; ignora los desconocidos (p. ej. de otra versión).
+Set<ExploreShelfId> parseHiddenShelves(Iterable<String>? names) {
+  if (names == null) return {};
+  final byName = {for (final id in ExploreShelfId.values) id.name: id};
+  return {for (final n in names) ?byName[n]};
+}
+
+/// En orden del enum, para que lo guardado no dependa del orden de inserción.
+List<String> serializeHiddenShelves(Set<ExploreShelfId> hidden) =>
+    [for (final id in ExploreShelfId.values) if (hidden.contains(id)) id.name];
+
+class ExploreCountry {
+  final String code;
+  final String nameEs;
+  final String nameEn;
+  const ExploreCountry(this.code, this.nameEs, this.nameEn);
+
+  String nameFor({required bool english}) => english ? nameEn : nameEs;
+}
+
+/// Países en los que YouTube Music ofrece listas propias.
+const List<ExploreCountry> kExploreCountries = [
+  ExploreCountry('AL', 'Albania', 'Albania'),
+  ExploreCountry('DZ', 'Argelia', 'Algeria'),
+  ExploreCountry('AR', 'Argentina', 'Argentina'),
+  ExploreCountry('AM', 'Armenia', 'Armenia'),
+  ExploreCountry('AU', 'Australia', 'Australia'),
+  ExploreCountry('AT', 'Austria', 'Austria'),
+  ExploreCountry('AZ', 'Azerbaiyán', 'Azerbaijan'),
+  ExploreCountry('BH', 'Baréin', 'Bahrain'),
+  ExploreCountry('BD', 'Bangladés', 'Bangladesh'),
+  ExploreCountry('BY', 'Bielorrusia', 'Belarus'),
+  ExploreCountry('BE', 'Bélgica', 'Belgium'),
+  ExploreCountry('BO', 'Bolivia', 'Bolivia'),
+  ExploreCountry('BA', 'Bosnia y Herzegovina', 'Bosnia and Herzegovina'),
+  ExploreCountry('BR', 'Brasil', 'Brazil'),
+  ExploreCountry('BG', 'Bulgaria', 'Bulgaria'),
+  ExploreCountry('KH', 'Camboya', 'Cambodia'),
+  ExploreCountry('CA', 'Canadá', 'Canada'),
+  ExploreCountry('CL', 'Chile', 'Chile'),
+  ExploreCountry('CO', 'Colombia', 'Colombia'),
+  ExploreCountry('CR', 'Costa Rica', 'Costa Rica'),
+  ExploreCountry('HR', 'Croacia', 'Croatia'),
+  ExploreCountry('CY', 'Chipre', 'Cyprus'),
+  ExploreCountry('CZ', 'Chequia', 'Czechia'),
+  ExploreCountry('DK', 'Dinamarca', 'Denmark'),
+  ExploreCountry('DO', 'República Dominicana', 'Dominican Republic'),
+  ExploreCountry('EC', 'Ecuador', 'Ecuador'),
+  ExploreCountry('EG', 'Egipto', 'Egypt'),
+  ExploreCountry('SV', 'El Salvador', 'El Salvador'),
+  ExploreCountry('EE', 'Estonia', 'Estonia'),
+  ExploreCountry('FI', 'Finlandia', 'Finland'),
+  ExploreCountry('FR', 'Francia', 'France'),
+  ExploreCountry('GE', 'Georgia', 'Georgia'),
+  ExploreCountry('DE', 'Alemania', 'Germany'),
+  ExploreCountry('GH', 'Ghana', 'Ghana'),
+  ExploreCountry('GR', 'Grecia', 'Greece'),
+  ExploreCountry('GT', 'Guatemala', 'Guatemala'),
+  ExploreCountry('HN', 'Honduras', 'Honduras'),
+  ExploreCountry('HK', 'Hong Kong', 'Hong Kong'),
+  ExploreCountry('HU', 'Hungría', 'Hungary'),
+  ExploreCountry('IS', 'Islandia', 'Iceland'),
+  ExploreCountry('IN', 'India', 'India'),
+  ExploreCountry('ID', 'Indonesia', 'Indonesia'),
+  ExploreCountry('IQ', 'Irak', 'Iraq'),
+  ExploreCountry('IE', 'Irlanda', 'Ireland'),
+  ExploreCountry('IL', 'Israel', 'Israel'),
+  ExploreCountry('IT', 'Italia', 'Italy'),
+  ExploreCountry('JM', 'Jamaica', 'Jamaica'),
+  ExploreCountry('JP', 'Japón', 'Japan'),
+  ExploreCountry('JO', 'Jordania', 'Jordan'),
+  ExploreCountry('KZ', 'Kazajistán', 'Kazakhstan'),
+  ExploreCountry('KE', 'Kenia', 'Kenya'),
+  ExploreCountry('KW', 'Kuwait', 'Kuwait'),
+  ExploreCountry('LA', 'Laos', 'Laos'),
+  ExploreCountry('LV', 'Letonia', 'Latvia'),
+  ExploreCountry('LB', 'Líbano', 'Lebanon'),
+  ExploreCountry('LY', 'Libia', 'Libya'),
+  ExploreCountry('LI', 'Liechtenstein', 'Liechtenstein'),
+  ExploreCountry('LT', 'Lituania', 'Lithuania'),
+  ExploreCountry('LU', 'Luxemburgo', 'Luxembourg'),
+  ExploreCountry('MY', 'Malasia', 'Malaysia'),
+  ExploreCountry('MT', 'Malta', 'Malta'),
+  ExploreCountry('MX', 'México', 'Mexico'),
+  ExploreCountry('ME', 'Montenegro', 'Montenegro'),
+  ExploreCountry('MA', 'Marruecos', 'Morocco'),
+  ExploreCountry('NP', 'Nepal', 'Nepal'),
+  ExploreCountry('NL', 'Países Bajos', 'Netherlands'),
+  ExploreCountry('NZ', 'Nueva Zelanda', 'New Zealand'),
+  ExploreCountry('NI', 'Nicaragua', 'Nicaragua'),
+  ExploreCountry('NG', 'Nigeria', 'Nigeria'),
+  ExploreCountry('MK', 'Macedonia del Norte', 'North Macedonia'),
+  ExploreCountry('NO', 'Noruega', 'Norway'),
+  ExploreCountry('OM', 'Omán', 'Oman'),
+  ExploreCountry('PK', 'Pakistán', 'Pakistan'),
+  ExploreCountry('PA', 'Panamá', 'Panama'),
+  ExploreCountry('PG', 'Papúa Nueva Guinea', 'Papua New Guinea'),
+  ExploreCountry('PY', 'Paraguay', 'Paraguay'),
+  ExploreCountry('PE', 'Perú', 'Peru'),
+  ExploreCountry('PH', 'Filipinas', 'Philippines'),
+  ExploreCountry('PL', 'Polonia', 'Poland'),
+  ExploreCountry('PT', 'Portugal', 'Portugal'),
+  ExploreCountry('PR', 'Puerto Rico', 'Puerto Rico'),
+  ExploreCountry('QA', 'Catar', 'Qatar'),
+  ExploreCountry('RO', 'Rumanía', 'Romania'),
+  ExploreCountry('RU', 'Rusia', 'Russia'),
+  ExploreCountry('SA', 'Arabia Saudita', 'Saudi Arabia'),
+  ExploreCountry('SN', 'Senegal', 'Senegal'),
+  ExploreCountry('RS', 'Serbia', 'Serbia'),
+  ExploreCountry('SG', 'Singapur', 'Singapore'),
+  ExploreCountry('SK', 'Eslovaquia', 'Slovakia'),
+  ExploreCountry('SI', 'Eslovenia', 'Slovenia'),
+  ExploreCountry('ZA', 'Sudáfrica', 'South Africa'),
+  ExploreCountry('KR', 'Corea del Sur', 'South Korea'),
+  ExploreCountry('ES', 'España', 'Spain'),
+  ExploreCountry('LK', 'Sri Lanka', 'Sri Lanka'),
+  ExploreCountry('SE', 'Suecia', 'Sweden'),
+  ExploreCountry('CH', 'Suiza', 'Switzerland'),
+  ExploreCountry('TW', 'Taiwán', 'Taiwan'),
+  ExploreCountry('TZ', 'Tanzania', 'Tanzania'),
+  ExploreCountry('TH', 'Tailandia', 'Thailand'),
+  ExploreCountry('TN', 'Túnez', 'Tunisia'),
+  ExploreCountry('TR', 'Turquía', 'Turkey'),
+  ExploreCountry('UG', 'Uganda', 'Uganda'),
+  ExploreCountry('UA', 'Ucrania', 'Ukraine'),
+  ExploreCountry('AE', 'Emiratos Árabes Unidos', 'United Arab Emirates'),
+  ExploreCountry('GB', 'Reino Unido', 'United Kingdom'),
+  ExploreCountry('US', 'Estados Unidos', 'United States'),
+  ExploreCountry('UY', 'Uruguay', 'Uruguay'),
+  ExploreCountry('VE', 'Venezuela', 'Venezuela'),
+  ExploreCountry('VN', 'Vietnam', 'Vietnam'),
+  ExploreCountry('YE', 'Yemen', 'Yemen'),
+  ExploreCountry('ZW', 'Zimbabue', 'Zimbabwe'),
+];
+
+/// Código en mayúsculas si está en [kExploreCountries]; si no, null (automático).
+String? normalizeExploreCountry(String? code) {
+  final c = (code ?? '').trim().toUpperCase();
+  return kExploreCountries.any((e) => e.code == c) ? c : null;
+}
+
+String foldForSearch(String text) {
+  const from = 'áàäâãéèëêíìïîóòöôõúùüûñç';
+  const to = 'aaaaaeeeeiiiiooooouuuunc';
+  final buf = StringBuffer();
+  for (final ch in text.toLowerCase().trim().split('')) {
+    final i = from.indexOf(ch);
+    buf.write(i < 0 ? ch : to[i]);
+  }
+  return buf.toString();
+}
+
+List<ExploreCountry> sortedExploreCountries({required bool english}) => [...kExploreCountries]
+  ..sort((a, b) => foldForSearch(a.nameFor(english: english)).compareTo(foldForSearch(b.nameFor(english: english))));
+
+/// Países cuyo nombre (sin acentos ni mayúsculas) o código contienen [query].
+List<ExploreCountry> filterExploreCountries(String query, {required bool english}) {
+  final q = foldForSearch(query);
+  final all = sortedExploreCountries(english: english);
+  if (q.isEmpty) return all;
+  return [
+    for (final c in all)
+      if (foldForSearch(c.nameFor(english: english)).contains(q) || c.code.toLowerCase() == q) c,
+  ];
+}
+
 final _videoIdPattern = RegExp(r'^[A-Za-z0-9_-]{11}$');
 
 /// Id de vídeo de una URL de YouTube (`watch?v=`, `youtu.be/`), o null.

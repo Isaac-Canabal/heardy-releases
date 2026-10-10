@@ -345,4 +345,60 @@ void main() {
       expect(uniqueCloudSongCount(cloud), 2);
     });
   });
+
+  group('cloudOnlySongs', () {
+    test('excluye lo que ya está por hash, incluso si la fila local está missing', () {
+      final cloud = [
+        {'songId': '1', 'fileHash': 'a', 'title': 'Uno'},
+        {'songId': '2', 'fileHash': 'b', 'title': 'Dos'},
+      ];
+      final result = cloudOnlySongs(cloud, localFileHashes: {'a'});
+      expect(result.map((s) => s['title']), ['Dos']);
+    });
+
+    test('excluye lo que ya se conoce por id de vídeo del sourceUrl', () {
+      final cloud = [
+        {'songId': '1', 'fileHash': 'a', 'title': 'Uno', 'sourceUrl': 'https://youtu.be/dQw4w9WgXcQ'},
+        {'songId': '2', 'fileHash': 'b', 'title': 'Dos', 'sourceUrl': 'https://youtu.be/aaaaaaaaaaa'},
+      ];
+      final result = cloudOnlySongs(
+        cloud,
+        localFileHashes: const {},
+        localSourceUrls: {'https://www.youtube.com/watch?v=dQw4w9WgXcQ'},
+      );
+      expect(result.map((s) => s['title']), ['Dos']);
+    });
+
+    test('sin sourceUrl se conserva y filas repetidas por hash salen una vez', () {
+      final cloud = [
+        {'songId': '1', 'fileHash': 'a', 'title': 'Uno'},
+        {'songId': '2', 'fileHash': 'a', 'title': 'Uno'},
+      ];
+      expect(cloudOnlySongs(cloud, localFileHashes: const {}), hasLength(1));
+    });
+  });
+
+  group('remoteTrackFromCloudSong', () {
+    test('construye el RemoteTrack desde el sourceUrl de YouTube', () {
+      final track = remoteTrackFromCloudSong({
+        'title': 'Uno',
+        'artist': 'X',
+        'album': 'Disco',
+        'durationSeconds': 200,
+        'sourceUrl': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      });
+      expect(track, isNotNull);
+      expect(track!.id, 'dQw4w9WgXcQ');
+      expect(track.title, 'Uno');
+      expect(track.artist, 'X');
+      expect(track.album, 'Disco');
+      expect(track.durationSeconds, 200);
+      expect(track.sourceUrl, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    });
+
+    test('sin sourceUrl no hay track', () {
+      expect(remoteTrackFromCloudSong({'title': 'Uno'}), isNull);
+      expect(remoteTrackFromCloudSong({'title': 'Uno', 'sourceUrl': ''}), isNull);
+    });
+  });
 }

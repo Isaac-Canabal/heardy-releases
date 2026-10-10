@@ -11,7 +11,9 @@ import '../screens/auth/login_screen.dart';
 import '../screens/friends_screen.dart';
 import '../screens/legal_screen.dart';
 import '../screens/sync_status_screen.dart';
+import '../screens/cloud_library_screen.dart';
 import '../services/audio_effects_service.dart';
+import '../services/audio_player_handler.dart';
 import '../services/database_helper.dart';
 import '../theme/app_theme.dart';
 import '../services/artwork_repair_service.dart';
@@ -22,6 +24,7 @@ import '../widgets/max_width_center.dart';
 import '../models/statistics_data.dart';
 import '../services/share_image_service.dart';
 import '../services/statistics_service.dart';
+import '../widgets/color_picker_panel.dart';
 import '../widgets/share_stats_card.dart';
 import '../widgets/statistics_view.dart';
 import '../widgets/username_claim_sheet.dart';
@@ -262,6 +265,81 @@ class SettingsScreen extends StatelessWidget {
                     ),
                   );
                 }),
+                const Divider(height: 24, color: Colors.white12),
+                SwitchListTile(
+                  key: const Key('dynamic_now_playing_color_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: AppTheme.primaryLight,
+                  value: settings.dynamicNowPlayingColor,
+                  title: Text(
+                    l10n.settingsDynamicNowPlayingColor,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    l10n.settingsDynamicNowPlayingColorBody,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                  ),
+                  onChanged: settings.setDynamicNowPlayingColor,
+                ),
+                const Divider(height: 24, color: Colors.white12),
+                SwitchListTile(
+                  key: const Key('normalize_volume_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: AppTheme.primaryLight,
+                  value: settings.normalizeVolume,
+                  title: Text(
+                    l10n.settingsNormalizeVolume,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    l10n.settingsNormalizeVolumeBody,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                  ),
+                  onChanged: (v) {
+                    settings.setNormalizeVolume(v);
+                    context.read<AudioPlayerHandler>().setNormalizeVolume(v);
+                  },
+                ),
+                if (context.read<AudioPlayerHandler>().supportsSkipSilence)...[
+                const Divider(height: 24, color: Colors.white12),
+                SwitchListTile(
+                  key: const Key('skip_silence_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: AppTheme.primaryLight,
+                  value: settings.skipSilence,
+                  title: Text(
+                    l10n.settingsSkipSilence,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    l10n.settingsSkipSilenceBody,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                  ),
+                  onChanged: (v) {
+                    settings.setSkipSilence(v);
+                    context.read<AudioPlayerHandler>().setSkipSilence(v);
+                  },
+                ),
+                ],
+                const Divider(height: 24, color: Colors.white12),
+                SwitchListTile(
+                  key: const Key('track_fade_switch'),
+                  contentPadding: EdgeInsets.zero,
+                  activeThumbColor: AppTheme.primaryLight,
+                  value: settings.trackFade,
+                  title: Text(
+                    l10n.settingsTrackFade,
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    l10n.settingsTrackFadeBody,
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+                  ),
+                  onChanged: (v) {
+                    settings.setTrackFade(v);
+                    context.read<AudioPlayerHandler>().setTrackFade(v);
+                  },
+                ),
               ],
             ),
           ),
@@ -558,6 +636,17 @@ class SettingsScreen extends StatelessWidget {
                     height: 1.4,
                   ),
                 ),
+                if (Platform.isWindows) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    l10n.settingsAboutThirdParty,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.35),
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -620,9 +709,6 @@ class _StatisticsSectionState extends State<_StatisticsSection> {
     if (sync != null) {
       _seenHistoryRevision = sync.historyRevision;
       sync.addListener(_onSyncChanged);
-      // Sin await y estrangulado por dentro: abrir Estadísticas trae lo que
-      // otros dispositivos hayan subido, sin temporizadores.
-      unawaited(sync.syncIfStale());
     }
   }
 
@@ -992,7 +1078,23 @@ class _AccountSection extends StatelessWidget {
                     icon: const Icon(Icons.compare_arrows_rounded, size: 18),
                     onPressed: () => Navigator.of(context)
                         .push(MaterialPageRoute(builder: (_) => const SyncStatusScreen())),
-                    label: const Text('Restaurar desde tu cuenta'),
+                    label: Text(l10n.restoreTitle),
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(
+                      alignment: Alignment.centerLeft,
+                      foregroundColor: Colors.white70,
+                    ),
+                    icon: const Icon(Icons.devices_rounded, size: 18),
+                    onPressed: () => Navigator.of(context)
+                        .push(MaterialPageRoute(builder: (_) => const CloudLibraryScreen())),
+                    label: Text(l10n.cloudLibTitle),
                   ),
                 ),
               ],
@@ -1434,6 +1536,8 @@ class _CustomThemeSheetState extends State<_CustomThemeSheet> {
   late Color _primary = widget.initialPrimary;
   late Color _secondary = widget.initialSecondary;
   late bool _combined = widget.initialCombined;
+  bool _primaryPickerOpen = false;
+  bool _secondaryPickerOpen = false;
   late final _primaryHexController = TextEditingController(text: _hex(_primary));
   late final _secondaryHexController = TextEditingController(text: _hex(_secondary));
 
@@ -1482,33 +1586,23 @@ class _CustomThemeSheetState extends State<_CustomThemeSheet> {
                 const SizedBox(height: 16),
                 _buildPreview(),
                 const SizedBox(height: 20),
-                Text(
-                  l10n.themePrimaryColorLabel,
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13),
+                _buildColorSection(
+                  label: l10n.themePrimaryColorLabel,
+                  color: _primary,
+                  controller: _primaryHexController,
+                  expanded: _primaryPickerOpen,
+                  onToggle: () => setState(() => _primaryPickerOpen = !_primaryPickerOpen),
+                  onColor: (c) => setState(() => _primary = c),
                 ),
-                const SizedBox(height: 10),
-                _buildSwatchGrid(_primary, (c) {
-                  setState(() {
-                    _primary = c;
-                    _primaryHexController.text = _hex(c);
-                  });
-                }),
-                const SizedBox(height: 8),
-                _buildHexField(_primaryHexController, (c) => setState(() => _primary = c)),
                 const SizedBox(height: 20),
-                Text(
-                  l10n.themeSecondaryColorLabel,
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13),
+                _buildColorSection(
+                  label: l10n.themeSecondaryColorLabel,
+                  color: _secondary,
+                  controller: _secondaryHexController,
+                  expanded: _secondaryPickerOpen,
+                  onToggle: () => setState(() => _secondaryPickerOpen = !_secondaryPickerOpen),
+                  onColor: (c) => setState(() => _secondary = c),
                 ),
-                const SizedBox(height: 10),
-                _buildSwatchGrid(_secondary, (c) {
-                  setState(() {
-                    _secondary = c;
-                    _secondaryHexController.text = _hex(c);
-                  });
-                }),
-                const SizedBox(height: 8),
-                _buildHexField(_secondaryHexController, (c) => setState(() => _secondary = c)),
                 const SizedBox(height: 12),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1540,6 +1634,54 @@ class _CustomThemeSheetState extends State<_CustomThemeSheet> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildColorSection({
+    required String label,
+    required Color color,
+    required TextEditingController controller,
+    required bool expanded,
+    required VoidCallback onToggle,
+    required ValueChanged<Color> onColor,
+  }) {
+    final l10n = AppLocalizations.of(context)!;
+    void set(Color c) {
+      controller.text = _hex(c);
+      onColor(c);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13),
+        ),
+        const SizedBox(height: 10),
+        _buildSwatchGrid(color, set),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            _buildHexField(controller, onColor),
+            const SizedBox(width: 8),
+            TextButton.icon(
+              onPressed: onToggle,
+              icon: Icon(expanded ? Icons.expand_less : Icons.palette_outlined, size: 18),
+              label: Text(expanded ? l10n.themePickerHideLabel : l10n.themePickExactColor),
+            ),
+          ],
+        ),
+        if (expanded) ...[
+          const SizedBox(height: 10),
+          ColorPickerPanel(
+            color: color,
+            onChanged: set,
+            hueLabel: l10n.themePickerHueLabel,
+            saturationValueLabel: l10n.themePickerSaturationValueLabel,
+          ),
+        ],
+      ],
     );
   }
 
@@ -1595,6 +1737,11 @@ class _CustomThemeSheetState extends State<_CustomThemeSheet> {
         controller: controller,
         style: const TextStyle(color: Colors.white, fontSize: 13),
         decoration: const InputDecoration(isDense: true, hintText: '#RRGGBB'),
+        onChanged: (value) {
+          if (value.trim().replaceFirst('#', '').length != 6) return;
+          final c = _parseHex(value);
+          if (c != null) onValid(c);
+        },
         onSubmitted: (value) {
           final c = _parseHex(value);
           if (c != null) onValid(c);

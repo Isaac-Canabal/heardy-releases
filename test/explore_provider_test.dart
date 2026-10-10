@@ -45,6 +45,11 @@ Song _song(String id, String artist, String? url) => Song(
 class _FakeSource implements DownloadSource {
   final radioSeeds = <String>[];
   int chartsCalls = 0;
+  final chartsFresh = <bool>[];
+  final chartsCountries = <String?>[];
+  int newReleasesCalls = 0;
+  int homeCalls = 0;
+  int moodsCalls = 0;
   bool failCharts = false;
   final Map<String, List<RemoteTrack>> radioBySeed = {};
 
@@ -55,29 +60,39 @@ class _FakeSource implements DownloadSource {
   }
 
   @override
-  Future<List<ExplorePlaylist>> exploreCharts({String? country}) async {
+  Future<List<ExplorePlaylist>> exploreCharts({String? country, bool fresh = false}) async {
     chartsCalls++;
+    chartsFresh.add(fresh);
+    chartsCountries.add(country);
     if (failCharts) throw DownloadSourceException(DownloadSourceErrorKind.network, 'x');
     return const [ExplorePlaylist(playlistId: 'PL1', title: 'Top')];
   }
 
   @override
-  Future<List<ExploreAlbum>> exploreNewReleases({String? country}) async =>
-      const [ExploreAlbum(browseId: 'MPRE1', title: 'Álbum')];
+  Future<List<ExploreAlbum>> exploreNewReleases({String? country, bool fresh = false}) async {
+    newReleasesCalls++;
+    return const [ExploreAlbum(browseId: 'MPRE1', title: 'Álbum')];
+  }
 
   @override
-  Future<List<ExploreShelf>> exploreHome({String? country}) async => const [
-        ExploreShelf(
-          title: 'Para ti',
-          kind: ExploreShelfKind.playlists,
-          playlists: [ExplorePlaylist(playlistId: 'PL2', title: 'Mix')],
-        ),
-      ];
+  Future<List<ExploreShelf>> exploreHome({String? country, bool fresh = false}) async {
+    homeCalls++;
+    return const [
+      ExploreShelf(
+        title: 'Para ti',
+        kind: ExploreShelfKind.playlists,
+        playlists: [ExplorePlaylist(playlistId: 'PL2', title: 'Mix')],
+      ),
+    ];
+  }
 
   @override
-  Future<List<ExploreMoodSection>> exploreMoods({String? country}) async => const [
-        ExploreMoodSection(title: 'Moods', moods: [ExploreMood(title: 'Chill', params: 'p')]),
-      ];
+  Future<List<ExploreMoodSection>> exploreMoods({String? country, bool fresh = false}) async {
+    moodsCalls++;
+    return const [
+      ExploreMoodSection(title: 'Moods', moods: [ExploreMood(title: 'Chill', params: 'p')]),
+    ];
+  }
 
   @override
   dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
@@ -176,6 +191,20 @@ void main() {
     expect(provider.charts.data, hasLength(1));
   });
 
+  test('refresh manual pide fresh=true; loadNetwork y refreshIfStale no', () async {
+    final source = _FakeSource();
+    final provider = ExploreProvider(source: source);
+    await provider.loadNetwork();
+    await provider.refresh();
+    expect(source.chartsFresh, [false, true]);
+    var now = DateTime(2030);
+    final stale = ExploreProvider(source: source, now: () => now);
+    await stale.loadNetwork();
+    now = DateTime(2031);
+    await stale.refreshIfStale();
+    expect(source.chartsFresh.sublist(2), [false, false]);
+  });
+
   test('refreshIfStale: fresco no vuelve a pedir; vencido sí; con error reintenta', () async {
     var clock = DateTime(2026, 10, 9, 8);
     final source = _FakeSource();
@@ -219,5 +248,76 @@ void main() {
     final db = await h.database;
     await db.update('songs', {'missing': 1}, where: 'id = ?', whereArgs: ['s1']);
     expect(await provider.findLocalSong(_a), isNull);
+  });
+
+  group('personalizar', () {
+    test('las estanterías ocultas no se piden', () async {
+      final source = _FakeSource();
+      final provider = ExploreProvider(
+        source: source,
+        hiddenShelves: () => {ExploreShelfId.charts, ExploreShelfId.moods, ExploreShelfId.recent},
+      );
+
+      await provider.loadLocal();
+      await provider.loadNetwork();
+      await provider.refresh();
+      await provider.reloadShelf(ExploreShelfId.charts);
+
+      expect(source.chartsCalls, 0);
+      expect(source.moodsCalls, 0);
+      expect(source.homeCalls, 2);
+      expect(provider.charts.isIdle, isTrue);
+      expect(provider.recent.isIdle, isTrue);
+      expect(provider.artists.status, ShelfStatus.data);
+    });
+
+    test('un error en una estantería oculta no cuenta como error de red', () async {
+      final source = _FakeSource()..failCharts = true;
+      final provider = ExploreProvider(source: source);
+      await provider.loadNetwork();
+      expect(provider.hasNetworkError, isTrue);
+
+      final hidden = ExploreProvider(source: source, hiddenShelves: () => {ExploreShelfId.charts});
+      await hidden.loadNetwork();
+      expect(hidden.hasNetworkError, isFalse);
+    });
+
+    test('syncPreferences al cambiar el país recarga sólo las regionales visibles con fresh', () async {
+      var country = 'ES';
+      final hidden = <ExploreShelfId>{ExploreShelfId.moods};
+      final source = _FakeSource();
+      final provider = ExploreProvider(source: source, country: () => country, hiddenShelves: () => hidden);
+      await provider.loadNetwork();
+      expect(source.chartsCountries, ['ES']);
+      final radioBefore = source.radioSeeds.length;
+
+      await provider.syncPreferences();
+      expect(source.chartsCalls, 1, reason: 'mismo país: no se vuelve a pedir');
+
+      country = 'MX';
+      await provider.syncPreferences();
+      expect(source.chartsCountries, ['ES', 'MX']);
+      expect(source.chartsFresh, [false, true]);
+      expect(source.newReleasesCalls, 2);
+      expect(source.homeCalls, 2);
+      expect(source.moodsCalls, 0);
+      expect(source.radioSeeds.length, radioBefore);
+    });
+
+    test('syncPreferences carga lo que se acaba de mostrar con el país vigente', () async {
+      var country = 'ES';
+      var hidden = <ExploreShelfId>{ExploreShelfId.moods};
+      final source = _FakeSource();
+      final provider = ExploreProvider(source: source, country: () => country, hiddenShelves: () => hidden);
+      await provider.loadNetwork();
+
+      country = 'AR';
+      hidden = {};
+      await provider.syncPreferences();
+
+      expect(source.moodsCalls, 1);
+      expect(provider.moods.data, hasLength(1));
+      expect(source.chartsCountries.last, 'AR');
+    });
   });
 }

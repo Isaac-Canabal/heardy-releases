@@ -314,8 +314,10 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   Future<SetShuffleModeResponse> setShuffleMode(
       SetShuffleModeRequest request) async {
     bool shuffling = request.shuffleMode != ShuffleModeMessage.none;
-    await _player.setShuffle(shuffling);
-
+    // Patch de Heardy: ya no se llama a `_player.setShuffle`. `playlist-shuffle`
+    // de mpv reordena la lista interna y desalinea los índices de just_audio
+    // (salto inmediato a otra pista y "siguiente" fuera de orden). El
+    // aleatorio real lo aplica el handler reordenando la cola.
     _dataController.add(PlayerDataMessage(
         shuffleMode:
             shuffling ? ShuffleModeMessage.all : ShuffleModeMessage.none));

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../build_marker.dart';
 import '../l10n/app_localizations.dart';
 import '../models/playlist.dart';
 import '../providers/auth_provider.dart';
@@ -245,6 +244,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   Future<void> _confirmRestore() async {
     setState(() => _phase = _Phase.enqueuing);
 
+    final restoredPlaylistName = AppLocalizations.of(context)!.restoreRestoredPlaylistName;
     final musicProvider = context.read<MusicProvider>();
     final downloadProvider = context.read<DownloadProvider>();
     final playlistNameById = {
@@ -265,10 +265,20 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
       final acceptable = entry.value.where((m) => m.isAcceptable).toList();
       if (acceptable.isEmpty) continue;
 
-      // Sin playlist en la nube (suelta): la cola de descargas exige un
-      // playlistId real (D6/W7), así que estas quedan fuera de la
-      // restauración automática — el usuario las busca a mano si las quiere.
-      if (cloudPlaylistId == null) continue;
+      if (cloudPlaylistId == null) {
+        final queuedLoose = <String>{};
+        for (final match in acceptable) {
+          if (!queuedLoose.add(match.youtubeTrack!.id)) continue;
+          final ok = await downloadProvider.enqueueTrack(
+            match.youtubeTrack!,
+            playlistId: inboxDownloadTarget,
+            sourceType: 'restore',
+            metadataComplete: match.metadataComplete,
+          );
+          if (ok) enqueued++;
+        }
+        continue;
+      }
 
       // Mismo id que en la nube a propósito: si esta playlist ya existe acá
       // (porque el usuario la creó en este mismo equipo, o una restauración
@@ -284,7 +294,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         await DatabaseHelper.instance.insertPlaylist(
           Playlist(
             id: targetPlaylistId,
-            name: playlistNameById[cloudPlaylistId] ?? 'Restaurada',
+            name: playlistNameById[cloudPlaylistId] ?? restoredPlaylistName,
             creationDate: DateTime.now(),
             // Sin esto, una playlist restaurada pierde para siempre el botón
             // "Actualizar desde YouTube" — sólo aparece si originalUrl no es
@@ -354,11 +364,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         // "Ya estaban" y "son de canciones que no tenés" se distinguen mal
         // entre sí y no aportan nada distinto al usuario; lo que importa es
         // que el servidor tenía datos y cuántos entraron.
+        final l10n = AppLocalizations.of(context)!;
         _historyResult = seen == 0
-            ? 'Tu cuenta no tiene historial guardado en la nube.'
+            ? l10n.restoreHistoryNone
             : restored == 0
-                ? 'Las $seen reproducciones de tu cuenta ya estaban acá (o son de canciones que este equipo no tiene).'
-                : 'Se recuperaron $restored reproducciones de $seen.';
+                ? l10n.restoreHistoryAllPresent(seen)
+                : l10n.restoreHistoryRecovered(restored, seen);
       });
     } catch (e) {
       if (!mounted) return;
@@ -373,19 +384,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        title: const Text('Restaurar desde tu cuenta'),
-        // TEMP: identificador de build — ver build_marker.dart.
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(
-                'build $buildMarker',
-                style: const TextStyle(color: Colors.white38, fontSize: 11),
-              ),
-            ),
-          ),
-        ],
+        title: Text(AppLocalizations.of(context)!.restoreTitle),
         backgroundColor: Colors.transparent,
       ),
       body: Container(
@@ -396,6 +395,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   }
 
   Widget _buildBody() {
+    final l10n = AppLocalizations.of(context)!;
     switch (_phase) {
       case _Phase.loading:
         return const Center(child: CircularProgressIndicator());
@@ -403,16 +403,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         return _buildMessage(_error!, retry: true);
       case _Phase.noCloudLibrary:
         return _buildMessage(
-          'Tu cuenta (${_accountEmail ?? 'sin identificar'}) todavía no tiene ninguna biblioteca subida a la '
-          'nube. Esto compara contra lo que ya subió otro dispositivo — andá a tu teléfono, Ajustes → Cuenta, '
-          'y tocá "Sincronizar ahora" ahí primero.',
+          l10n.restoreNoCloudLibrary(_accountEmail ?? l10n.restoreUnknownAccount),
           retry: true,
         );
       case _Phase.upToDate:
         return _buildMessage(
-          _cloudTotal == 0
-              ? 'La biblioteca en la nube está vacía todavía.'
-              : 'Ya tenés las $_cloudTotal canciones de tu cuenta en este equipo.',
+          _cloudTotal == 0 ? l10n.restoreCloudEmpty : l10n.restoreUpToDate(_cloudTotal),
         );
       case _Phase.matching:
         return Center(
@@ -426,7 +422,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Buscando en YouTube $_matchedCount de $_totalToMatch...',
+                  l10n.restoreMatching(_matchedCount, _totalToMatch),
                   style: const TextStyle(color: Colors.white70),
                 ),
               ],
@@ -439,9 +435,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         return const Center(child: CircularProgressIndicator());
       case _Phase.done:
         return _buildMessage(
-          _enqueuedCount == 0
-              ? 'No se encontró ninguna coincidencia aceptable.'
-              : 'Se encolaron $_enqueuedCount canciones — mirá el progreso en Añadir.',
+          _enqueuedCount == 0 ? l10n.restoreDoneNone : l10n.restoreDoneQueued(_enqueuedCount),
         );
     }
   }
@@ -460,7 +454,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
             ),
             if (retry) ...[
               const SizedBox(height: 16),
-              OutlinedButton(onPressed: _load, child: const Text('Reintentar')),
+              OutlinedButton(onPressed: _load, child: Text(AppLocalizations.of(context)!.restoreRetry)),
             ],
             const Divider(height: 40, color: Colors.white12),
             _buildHistoryRestore(),
@@ -471,12 +465,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   }
 
   Widget _buildHistoryRestore() {
+    final l10n = AppLocalizations.of(context)!;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          'Tus reproducciones se suben a la cuenta aparte de la biblioteca, así que '
-          'pueden seguir en la nube aunque este equipo las haya perdido.',
+          l10n.restoreHistoryExplain,
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
         ),
@@ -494,7 +488,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                 )
               : const Icon(Icons.history_rounded, size: 18),
           onPressed: _restoringHistory ? null : _restoreHistory,
-          label: const Text('Recuperar mi historial'),
+          label: Text(l10n.restoreHistoryButton),
         ),
         if (_historyResult != null) ...[
           const SizedBox(height: 12),
@@ -509,6 +503,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
   }
 
   Widget _buildReview() {
+    final l10n = AppLocalizations.of(context)!;
     final acceptable = _acceptableCount;
     final totalMatched = _matchesByPlaylist.values.fold<int>(0, (n, l) => n + l.length);
     final skipped = totalMatched - acceptable;
@@ -518,9 +513,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Text(
-            skipped == 0
-                ? '$acceptable canciones encontradas.'
-                : '$acceptable canciones encontradas — $skipped sin coincidencia aceptable, no se descargarán.',
+            skipped == 0 ? l10n.restoreFound(acceptable) : l10n.restoreFoundSkipped(acceptable, skipped),
             style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
         ),
@@ -533,12 +526,12 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Text(
                     entry.key == null
-                        ? 'Sin playlist (no se restauran automáticamente)'
+                        ? l10n.restoreLooseHeader
                         : (_cloudPlaylists.firstWhere(
                               (p) => p['playlistId'] == entry.key,
-                              orElse: () => const {'name': 'Playlist'},
+                              orElse: () => const {},
                             )['name'] as String? ??
-                            'Playlist'),
+                            l10n.restoreDefaultPlaylist),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 14,
@@ -565,7 +558,7 @@ class _SyncStatusScreenState extends State<SyncStatusScreen> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: acceptable == 0 ? null : _confirmRestore,
-                child: Text('Descargar $acceptable canciones'),
+                child: Text(l10n.restoreDownloadCount(acceptable)),
               ),
             ),
           ),
@@ -581,11 +574,12 @@ class _MatchRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final (icon, color, subtitle) = switch (match) {
       CloudSongMatch(isExactSource: true) => (
           Icons.verified_rounded,
           Colors.greenAccent,
-          '${match.artist} · enlace original',
+          l10n.restoreRowExact(match.artist),
         ),
       CloudSongMatch(isGoodMatch: true) => (
           Icons.check_circle_rounded,
@@ -595,12 +589,12 @@ class _MatchRow extends StatelessWidget {
       CloudSongMatch(isAcceptable: true) => (
           Icons.check_circle_outline_rounded,
           Colors.orangeAccent,
-          '${match.artist} · revisar duración (±${match.durationDiffSeconds}s)',
+          l10n.restoreRowReview(match.artist, match.durationDiffSeconds ?? 0),
         ),
       _ => (
           Icons.cancel_outlined,
           Colors.white38,
-          '${match.artist} · sin coincidencia, no se descargará',
+          l10n.restoreRowNoMatch(match.artist),
         ),
     };
     return ListTile(

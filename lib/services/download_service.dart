@@ -207,6 +207,9 @@ class DownloadService {
         if (playlistId != null) {
           await _addToPlaylist(playlistId, existing.id);
         }
+        if (track.sourceUrl.isNotEmpty) {
+          await _db.fillSongSourceUrlIfEmpty(existing.id, track.sourceUrl);
+        }
         // La fila ya existía pero sin carátula (descargas anteriores a que
         // las miniaturas llegaran en JPEG): ésta es la ocasión de dársela.
         if (coverBytes != null && !await _hasArtwork(existing)) {

@@ -70,6 +70,22 @@ void main() {
     expect(uris[6].queryParameters['seed'], 'abcdefghijk');
   });
 
+  test('fresh=1 sólo se manda cuando se pide', () async {
+    final c = _Client(200, {'playlists': [], 'albums': [], 'sections': [], 'shelves': []});
+    final s = _source(c);
+    await s.exploreCharts();
+    await s.exploreCharts(fresh: true);
+    await s.exploreHome(fresh: true);
+    await s.exploreNewReleases(fresh: true);
+    await s.exploreMoods(country: 'CO', fresh: true);
+    final q = c.requests.map((r) => r.url.queryParameters).toList();
+    expect(q[0].containsKey('fresh'), isFalse);
+    expect(q[1]['fresh'], '1');
+    expect(q[2]['fresh'], '1');
+    expect(q[3]['fresh'], '1');
+    expect(q[4], {'country': 'CO', 'fresh': '1'});
+  });
+
   test('502 explore_unavailable es extraction (reintentable)', () async {
     final c = _Client(502, {'detail': 'x', 'reason': 'explore_unavailable'});
     await expectLater(

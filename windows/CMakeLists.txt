@@ -129,3 +129,56 @@ if(EXISTS "${YTDLP_LOCAL}")
   install(FILES "${YTDLP_LOCAL}" DESTINATION "${CMAKE_INSTALL_PREFIX}/yt-dlp"
     COMPONENT Runtime)
 endif()
+
+# ffmpeg.exe (build LGPL, no GPL) para la onda del seek bar en Windows: las
+# descargas son M4A fragmentado y Media Foundation no lo lee. Se descarga fijado
+# a un autobuild de BtbN/FFmpeg-Builds (n8.1.3, "win64-lgpl-shared") y verificado
+# por SHA-256; no se versiona. Si BtbN retira ese autobuild, subir a otro y
+# recalcular el hash. El .zip es lo que se descarga (~81 MB); se trata como no
+# confiable: se extrae en su propio directorio nuevo y solo se copian
+# ffmpeg.exe, sus DLL y LICENSE.txt. La app lo busca en <exe>/ffmpeg/ffmpeg.exe;
+# sin el, la onda cae al Slider.
+set(FFMPEG_TAG "autobuild-2026-10-10-13-04")
+set(FFMPEG_DIRNAME "ffmpeg-n8.1.3-17-gc389840894-win64-lgpl-shared-8.1")
+set(FFMPEG_SHA256 "cfb9db660bf2751dcc7d79791250b0e6df1a3f63cfc00260f6b66626c425b112")
+set(FFMPEG_ZIP "${CMAKE_BINARY_DIR}/ffmpeg-dl/${FFMPEG_DIRNAME}.zip")
+set(FFMPEG_EXTRACT_DIR "${CMAKE_BINARY_DIR}/ffmpeg-extract-${FFMPEG_TAG}")
+set(FFMPEG_FILES
+  ffmpeg.exe avcodec-62.dll avdevice-62.dll avfilter-11.dll avformat-62.dll
+  avutil-60.dll swresample-6.dll swscale-9.dll)
+if(NOT EXISTS "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/ffmpeg.exe")
+  file(DOWNLOAD
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_TAG}/${FFMPEG_DIRNAME}.zip"
+    "${FFMPEG_ZIP}"
+    EXPECTED_HASH SHA256=${FFMPEG_SHA256}
+    STATUS FFMPEG_DL_STATUS)
+  list(GET FFMPEG_DL_STATUS 0 FFMPEG_DL_CODE)
+  if(FFMPEG_DL_CODE EQUAL 0)
+    file(REMOVE_RECURSE "${FFMPEG_EXTRACT_DIR}")
+    file(MAKE_DIRECTORY "${FFMPEG_EXTRACT_DIR}")
+    set(FFMPEG_MEMBERS "${FFMPEG_DIRNAME}/LICENSE.txt")
+    foreach(f ${FFMPEG_FILES})
+      list(APPEND FFMPEG_MEMBERS "${FFMPEG_DIRNAME}/bin/${f}")
+    endforeach()
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar xf "${FFMPEG_ZIP}" -- ${FFMPEG_MEMBERS}
+      WORKING_DIRECTORY "${FFMPEG_EXTRACT_DIR}"
+      RESULT_VARIABLE FFMPEG_EXTRACT_RESULT)
+    if(NOT FFMPEG_EXTRACT_RESULT EQUAL 0)
+      file(REMOVE_RECURSE "${FFMPEG_EXTRACT_DIR}")
+    endif()
+  else()
+    file(REMOVE "${FFMPEG_ZIP}")
+  endif()
+  if(NOT EXISTS "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/ffmpeg.exe")
+    message(WARNING "No se pudo preparar ffmpeg.exe: la onda del seek bar quedara desactivada en Windows")
+  endif()
+endif()
+if(EXISTS "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/ffmpeg.exe")
+  foreach(f ${FFMPEG_FILES})
+    install(FILES "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/${f}"
+      DESTINATION "${CMAKE_INSTALL_PREFIX}/ffmpeg" COMPONENT Runtime)
+  endforeach()
+  install(FILES "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/LICENSE.txt"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}/ffmpeg" COMPONENT Runtime)
+endif()

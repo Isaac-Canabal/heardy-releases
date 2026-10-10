@@ -381,21 +381,23 @@ class YtdlpServerSource implements DownloadSource {
     return q.isEmpty ? null : q;
   }
 
-  @override
-  Future<List<ExploreShelf>> exploreHome({String? country}) async =>
-      parseExploreHome(await _getJson('/explore/home', _countryQuery(country), _exploreTimeout));
+  static Map<String, String> _freshQuery(bool fresh) => fresh ? const {'fresh': '1'} : const {};
 
   @override
-  Future<List<ExplorePlaylist>> exploreCharts({String? country}) async =>
-      parseExplorePlaylists(await _getJson('/explore/charts', _countryQuery(country), _exploreTimeout));
+  Future<List<ExploreShelf>> exploreHome({String? country, bool fresh = false}) async =>
+      parseExploreHome(await _getJson('/explore/home', _countryQuery(country, _freshQuery(fresh)), _exploreTimeout));
 
   @override
-  Future<List<ExploreAlbum>> exploreNewReleases({String? country}) async =>
-      parseExploreAlbums(await _getJson('/explore/new-releases', _countryQuery(country), _exploreTimeout));
+  Future<List<ExplorePlaylist>> exploreCharts({String? country, bool fresh = false}) async =>
+      parseExplorePlaylists(await _getJson('/explore/charts', _countryQuery(country, _freshQuery(fresh)), _exploreTimeout));
 
   @override
-  Future<List<ExploreMoodSection>> exploreMoods({String? country}) async =>
-      parseExploreMoods(await _getJson('/explore/moods', _countryQuery(country), _exploreTimeout));
+  Future<List<ExploreAlbum>> exploreNewReleases({String? country, bool fresh = false}) async =>
+      parseExploreAlbums(await _getJson('/explore/new-releases', _countryQuery(country, _freshQuery(fresh)), _exploreTimeout));
+
+  @override
+  Future<List<ExploreMoodSection>> exploreMoods({String? country, bool fresh = false}) async =>
+      parseExploreMoods(await _getJson('/explore/moods', _countryQuery(country, _freshQuery(fresh)), _exploreTimeout));
 
   @override
   Future<List<ExplorePlaylist>> exploreMood(String params, {String? country}) async => parseExplorePlaylists(

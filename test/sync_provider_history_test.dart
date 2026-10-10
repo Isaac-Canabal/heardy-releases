@@ -187,12 +187,4 @@ void main() {
     await SyncProvider(source: cloud, db: db).syncNow();
     expect(cloud.getHistoryCalls.first, '2');
   });
-
-  test('syncIfStale estrangula a 2 minutos', () async {
-    final cloud = _FakeCloud();
-    final provider = SyncProvider(source: cloud, db: db);
-    await provider.syncIfStale();
-    await provider.syncIfStale();
-    expect(cloud.getAccountCalls, 1);
-  });
 }

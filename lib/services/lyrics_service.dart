@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'app_log.dart';
+import 'lyrics_logic.dart';
 
 class LyricLine {
   final Duration time;
   final String text;
-  LyricLine(this.time, this.text);
+  final List<LyricWord> words;
+  final Duration? wordsEnd;
+  LyricLine(this.time, this.text, {this.words = const [], this.wordsEnd});
 }
 
 /// Lo que devuelve una fuente de letras: el texto crudo (formato .lrc si
@@ -239,7 +242,6 @@ class LyricsService {
         final sec = int.parse(match.group(2)!);
         final msStr = match.group(3) ?? '0';
         final ms = int.parse(msStr);
-        final text = match.group(4)!.trim();
 
         // Convert centiseconds (2 digits) or milliseconds (3 digits) to ms
         final multiplier = msStr.length == 2 ? 10 : (msStr.length == 1 ? 100 : 1);
@@ -248,7 +250,8 @@ class LyricsService {
           seconds: sec,
           milliseconds: ms * multiplier,
         );
-        lines.add(LyricLine(duration, text));
+        final parsed = parseLyricText(match.group(4)!, duration);
+        lines.add(LyricLine(duration, parsed.text, words: parsed.words, wordsEnd: parsed.end));
       }
     }
 

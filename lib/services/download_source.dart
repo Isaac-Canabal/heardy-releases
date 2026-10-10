@@ -366,10 +366,11 @@ abstract class DownloadSource {
   Future<UsageStatus> usage();
 
   /// Explorar: [country] en mayúsculas de 2 letras, o null para el del servidor.
-  Future<List<ExploreShelf>> exploreHome({String? country});
-  Future<List<ExplorePlaylist>> exploreCharts({String? country});
-  Future<List<ExploreAlbum>> exploreNewReleases({String? country});
-  Future<List<ExploreMoodSection>> exploreMoods({String? country});
+  /// [fresh] pide saltarse la caché del servidor (refresco manual).
+  Future<List<ExploreShelf>> exploreHome({String? country, bool fresh = false});
+  Future<List<ExplorePlaylist>> exploreCharts({String? country, bool fresh = false});
+  Future<List<ExploreAlbum>> exploreNewReleases({String? country, bool fresh = false});
+  Future<List<ExploreMoodSection>> exploreMoods({String? country, bool fresh = false});
   Future<List<ExplorePlaylist>> exploreMood(String params, {String? country});
   Future<ExploreCollection> explorePlaylist(String playlistId);
   Future<ExploreCollection> exploreAlbum(String browseId);

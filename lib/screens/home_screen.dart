@@ -15,7 +15,7 @@ import '../widgets/max_width_center.dart';
 import 'friends_screen.dart';
 import 'history_screen.dart';
 import 'notifications_screen.dart';
-import '../services/friendly_error.dart';
+import 'smart_lists_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -26,13 +26,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
-  final TextEditingController _playlistNameController = TextEditingController();
   String _query = '';
 
   @override
   void dispose() {
     _searchController.dispose();
-    _playlistNameController.dispose();
     super.dispose();
   }
 
@@ -86,8 +84,17 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(width: 10),
                 _CircleIconButton(
-                  icon: Icons.add_rounded,
-                  onTap: () => _showCreatePlaylistDialog(context),
+                  icon: Icons.history_rounded,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const HistoryScreen()),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                _CircleIconButton(
+                  icon: Icons.auto_awesome_rounded,
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SmartListsScreen()),
+                  ),
                 ),
               ],
             ),
@@ -108,7 +115,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          const _HistoryEntryRow(),
           Expanded(
             child: playlists.isEmpty
                 ? _buildEmptyState()
@@ -168,77 +174,6 @@ class _HomeScreenState extends State<HomeScreen> {
     final username = await ensureUsername(context);
     if (username == null || !context.mounted) return;
     Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FriendsScreen()));
-  }
-
-  void _showCreatePlaylistDialog(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    _playlistNameController.clear();
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: AppTheme.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(l10n.homeNewPlaylistTitle, style: const TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: _playlistNameController,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(hintText: l10n.commonName),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(l10n.commonCancel, style: TextStyle(color: Colors.white.withValues(alpha: 0.5))),
-          ),
-          TextButton(
-            onPressed: () async {
-              final name = _playlistNameController.text.trim();
-              if (name.isNotEmpty) {
-                try {
-                  await Provider.of<MusicProvider>(context, listen: false)
-                      .createPlaylist(name);
-                  Navigator.pop(context);
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(localizedErrorReport(AppLocalizations.of(context)!, e)),
-                      backgroundColor: Colors.redAccent,
-                    ),
-                  );
-                }
-              }
-            },
-            child: Text(l10n.commonCreate, style: TextStyle(color: AppTheme.primaryLight, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Acceso al historial de escuchado, bajo el buscador.
-class _HistoryEntryRow extends StatelessWidget {
-  const _HistoryEntryRow();
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(kScreenGutter, 0, kScreenGutter, 4),
-      child: ListTile(
-        key: const Key('home_history_row'),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        leading: Icon(Icons.history_rounded, color: AppTheme.primaryLight),
-        title: Text(
-          l10n.historyTitle,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-        ),
-        trailing: Icon(Icons.chevron_right_rounded, color: Colors.white.withValues(alpha: 0.4)),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const HistoryScreen()),
-        ),
-      ),
-    );
   }
 }
 

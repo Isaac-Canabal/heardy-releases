@@ -4,6 +4,7 @@ import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'library_storage.dart';
+import 'replay_gain_logic.dart';
 import 'app_log.dart';
 
 /// Result of reading a song's tags, with every field already resolved
@@ -80,6 +81,7 @@ class MetadataService {
       appLog('MetadataService: copiado $fileName -> $tempPath (${copiedSize}b)');
       if (canReadTags(copiedSize)) {
         tags = readMetadata(tempFile, getImage: true);
+        await _storeReplayGain(songId, ext, tempFile);
         appLog(
           'MetadataService: readMetadata($fileName) -> title=${tags.title} artist=${tags.artist} '
           'album=${tags.album} pictures=${tags.pictures.length} duration=${tags.duration}',
@@ -119,6 +121,61 @@ class MetadataService {
       durationSeconds: duration,
       artPath: artPath,
     );
+  }
+
+  static const _replayGainExtensions = {'mp3', 'flac', 'ogg', 'oga', 'opus'};
+
+  static Future<File> _replayGainFile(String songId) async {
+    final docDir = await getApplicationDocumentsDirectory();
+    return File('${docDir.path}/replaygain/$songId.txt');
+  }
+
+  /// Ganancia ReplayGain guardada al importar la canción (dB), o null si el
+  /// archivo no traía la etiqueta. No hay columna en `songs`: se guarda en un
+  /// archivo pequeño por canción para no tocar el esquema.
+  static Future<double?> storedReplayGainDb(String songId) async {
+    try {
+      final f = await _replayGainFile(songId);
+      if (!await f.exists()) return null;
+      return parseReplayGainDb(await f.readAsString());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// El lector de tags sólo expone ReplayGain para MP3 (TXXX) y FLAC/OGG/Opus
+  /// (Vorbis); el M4A/MP4 de las descargas no se lee, y de hecho no lo trae.
+  /// Los tipos concretos no son públicos, de ahí el acceso dinámico.
+  Future<void> _storeReplayGain(String songId, String ext, File file) async {
+    if (!_replayGainExtensions.contains(ext.toLowerCase())) return;
+    try {
+      final tag = readAllMetadata(file, getImage: false) as dynamic;
+      final found = <String, String>{};
+      try {
+        final custom = tag.customMetadata;
+        if (custom is Map) {
+          for (final e in custom.entries) {
+            found[e.key.toString()] = e.value.toString();
+          }
+        }
+      } catch (_) {}
+      for (final entry in {
+        'REPLAYGAIN_TRACK_GAIN': () => tag.replayGainTrackGain,
+        'REPLAYGAIN_ALBUM_GAIN': () => tag.replayGainAlbumGain,
+      }.entries) {
+        try {
+          final v = entry.value();
+          if (v is List && v.isNotEmpty) found[entry.key] = v.first.toString();
+        } catch (_) {}
+      }
+      final db = pickTrackGainDb(found);
+      if (db == null) return;
+      final out = await _replayGainFile(songId);
+      await out.parent.create(recursive: true);
+      await out.writeAsString(db.toString());
+    } catch (e) {
+      appLog('MetadataService: sin ReplayGain para $songId: $e');
+    }
   }
 
   Future<String> _saveArtwork(String songId, Picture picture) async {

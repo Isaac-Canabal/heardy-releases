@@ -12,7 +12,7 @@
 ; cambiarlo nunca: es lo que permite que una instalación futura se detecte
 ; como una actualización en vez de una instalación paralela.
 #define MyAppName "Heardy"
-#define MyAppVersion "1.1.8"
+#define MyAppVersion "1.1.9"
 #define MyAppExeName "heardy.exe"
 #define MyReleaseDir "..\..\build\windows\x64\runner\Release"
 
@@ -91,5 +91,7 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /F"; Flags: run
 ; yt-dlp.exe viaja en {app}\yt-dlp (el install de CMake lo deja en la carpeta
 ; Release, así que ya entra en [Files]). La app mantiene una copia actualizable
 ; en %LOCALAPPDATA%\Heardy\yt-dlp, porque {app} suele ser de sólo lectura.
+; ffmpeg.exe (LGPL, para la onda del seek bar) y sus DLL viajan en {app}\ffmpeg,
+; con su LICENSE.txt; entran por el mismo [Files] recursivo que el resto de Release.
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Heardy\yt-dlp"

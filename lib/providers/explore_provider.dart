@@ -7,6 +7,8 @@ import '../services/download_source.dart';
 import '../services/explore_logic.dart';
 import '../services/statistics_service.dart';
 
+export '../services/explore_logic.dart' show ExploreShelfId;
+
 enum ShelfStatus { idle, loading, data, error }
 
 /// Estado de una estantería. En un refresco conserva [data] mientras vuelve a
@@ -27,8 +29,6 @@ class ShelfState<T> {
   bool get hasError => status == ShelfStatus.error;
 }
 
-enum ExploreShelfId { recent, artists, radio, charts, newReleases, home, moods }
-
 /// Estanterías de Explorar con caché en memoria durante la sesión. Las locales
 /// (historial) son instantáneas y no tocan la red; las de red sólo se piden la
 /// primera vez (o con [refresh]) y cada una falla por separado.
@@ -38,11 +38,15 @@ class ExploreProvider extends ChangeNotifier {
   final DownloadSource _source;
   final DatabaseHelper _db;
   final String? Function() _country;
+  final Set<ExploreShelfId> Function() _hidden;
   final Future<List<Map<String, dynamic>>> Function() _topArtistRows;
 
   final Map<ExploreShelfId, ShelfState<Object?>> _states = {
     for (final id in ExploreShelfId.values) id: const ShelfState<Object?>.idle(),
   };
+  /// País con el que se pidió cada estantería regional, para saber cuáles
+  /// quedaron viejas al cambiarlo.
+  final Map<ExploreShelfId, String?> _countryUsed = {};
   final Map<ExploreShelfId, int> _generation = {for (final id in ExploreShelfId.values) id: 0};
   bool _disposed = false;
   DateTime? _lastNetworkRefresh;
@@ -53,12 +57,14 @@ class ExploreProvider extends ChangeNotifier {
     required DownloadSource source,
     DatabaseHelper? db,
     String? Function()? country,
+    Set<ExploreShelfId> Function()? hiddenShelves,
     Future<List<Map<String, dynamic>>> Function()? topArtistRows,
     DateTime Function()? now,
     Future<List<Song>> Function(String videoId)? localSongsForVideo,
   })  : _source = source,
         _db = db ?? DatabaseHelper.instance,
         _country = country ?? deviceExploreCountry,
+        _hidden = hiddenShelves ?? (() => const {}),
         _topArtistRows = topArtistRows ?? (db ?? DatabaseHelper.instance).getTopArtistsThisMonth,
         _now = now ?? DateTime.now,
         _localSongsForVideo = localSongsForVideo ??
@@ -80,33 +86,48 @@ class ExploreProvider extends ChangeNotifier {
   ShelfState<List<ExploreShelf>> get home => _typed(ExploreShelfId.home);
   ShelfState<List<ExploreMoodSection>> get moods => _typed(ExploreShelfId.moods);
 
+  List<ExploreShelfId> get _visibleNetworkShelves {
+    final hidden = _hidden();
+    return [for (final id in _networkShelves) if (!hidden.contains(id)) id];
+  }
+
+  bool get hasNetworkError => _visibleNetworkShelves.any((id) => _states[id]!.hasError);
+
   ShelfState<T> _typed<T>(ExploreShelfId id) {
     final s = _states[id]!;
     return ShelfState<T>._(s.status, s.data as T?, s.error);
   }
 
   /// Historial local: barato, se vuelve a pedir cada vez que se abre la pestaña.
-  Future<void> loadLocal() => Future.wait([
+  Future<void> loadLocal() {
+    final hidden = _hidden();
+    return Future.wait([
+      if (!hidden.contains(ExploreShelfId.recent))
         _run<List<Song>>(ExploreShelfId.recent, () => _db.getRecentlyPlayedSongs(limit: 20), silent: true),
+      if (!hidden.contains(ExploreShelfId.artists))
         _run<List<String>>(ExploreShelfId.artists, _fetchArtists, silent: true),
-      ]);
+    ]);
+  }
 
   /// Pide las estanterías de red que aún no se han pedido. Las que fallaron se
   /// reintentan sólo con [reloadShelf] o [refresh], para no martillar al
   /// servidor cada vez que se cambia de pestaña.
   Future<void> loadNetwork() async {
+    final visible = _visibleNetworkShelves;
     final pending = [
-      for (final id in _networkShelves)
+      for (final id in visible)
         if (_states[id]!.isIdle) id,
     ];
     await Future.wait([for (final id in pending) reloadShelf(id)]);
-    if (pending.length == _networkShelves.length) _stampIfHealthy();
+    if (pending.length == visible.length) _stampIfHealthy();
   }
 
+  /// Refresco pedido por el usuario: además de volver a pedir, le dice al
+  /// servidor que se salte su caché. [refreshIfStale] no lo hace.
   Future<void> refresh() async {
     await Future.wait([
       loadLocal(),
-      for (final id in _networkShelves) reloadShelf(id),
+      for (final id in _visibleNetworkShelves) reloadShelf(id, fresh: true),
     ]);
     _stampIfHealthy();
   }
@@ -115,7 +136,14 @@ class ExploreProvider extends ChangeNotifier {
   /// (o nunca se cargó) lo vuelve a pedir conservando lo visible mientras tanto;
   /// si sigue fresco, sólo completa lo que falte.
   Future<void> refreshIfStale() async {
-    if (exploreNeedsRefresh(_lastNetworkRefresh, _now())) return refresh();
+    if (exploreNeedsRefresh(_lastNetworkRefresh, _now())) {
+      await Future.wait([
+        loadLocal(),
+        for (final id in _visibleNetworkShelves) reloadShelf(id),
+      ]);
+      _stampIfHealthy();
+      return;
+    }
     await loadLocal();
     await loadNetwork();
   }
@@ -123,7 +151,7 @@ class ExploreProvider extends ChangeNotifier {
   /// Sólo se da por fresco si ninguna estantería de red quedó en error: una
   /// que falló se reintenta en la siguiente entrada, no tras 15 minutos.
   void _stampIfHealthy() {
-    if (_networkShelves.any((id) => _states[id]!.status == ShelfStatus.error)) return;
+    if (_visibleNetworkShelves.any((id) => _states[id]!.status == ShelfStatus.error)) return;
     _lastNetworkRefresh = _now();
   }
 
@@ -146,7 +174,25 @@ class ExploreProvider extends ChangeNotifier {
     ExploreShelfId.moods,
   ];
 
-  Future<void> reloadShelf(ExploreShelfId id) {
+  /// Aplica un cambio de ajustes de Explorar (secciones visibles o país): lo
+  /// recién mostrado se carga y las regionales cargadas con otro país se vuelven
+  /// a pedir (frescas, el servidor cachea por país).
+  Future<void> syncPreferences() async {
+    final country = _country();
+    final stale = [
+      for (final id in _visibleNetworkShelves)
+        if (isRegionalShelf(id) && !_states[id]!.isIdle && _countryUsed[id] != country) id,
+    ];
+    await Future.wait([
+      loadLocal(),
+      for (final id in stale) reloadShelf(id, fresh: true),
+    ]);
+    await loadNetwork();
+  }
+
+  Future<void> reloadShelf(ExploreShelfId id, {bool fresh = false}) {
+    if (_hidden().contains(id)) return Future.value();
+    if (isRegionalShelf(id)) _countryUsed[id] = _country();
     switch (id) {
       case ExploreShelfId.recent:
       case ExploreShelfId.artists:
@@ -154,13 +200,13 @@ class ExploreProvider extends ChangeNotifier {
       case ExploreShelfId.radio:
         return _run<List<RemoteTrack>>(id, _fetchRadio);
       case ExploreShelfId.charts:
-        return _run<List<ExplorePlaylist>>(id, () => _source.exploreCharts(country: _country()));
+        return _run<List<ExplorePlaylist>>(id, () => _source.exploreCharts(country: _country(), fresh: fresh));
       case ExploreShelfId.newReleases:
-        return _run<List<ExploreAlbum>>(id, () => _source.exploreNewReleases(country: _country()));
+        return _run<List<ExploreAlbum>>(id, () => _source.exploreNewReleases(country: _country(), fresh: fresh));
       case ExploreShelfId.home:
-        return _run<List<ExploreShelf>>(id, () => _source.exploreHome(country: _country()));
+        return _run<List<ExploreShelf>>(id, () => _source.exploreHome(country: _country(), fresh: fresh));
       case ExploreShelfId.moods:
-        return _run<List<ExploreMoodSection>>(id, () => _source.exploreMoods(country: _country()));
+        return _run<List<ExploreMoodSection>>(id, () => _source.exploreMoods(country: _country(), fresh: fresh));
     }
   }
 

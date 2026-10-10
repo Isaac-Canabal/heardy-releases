@@ -8,6 +8,7 @@ import '../services/audio_player_handler.dart';
 import '../services/desktop_tray_service.dart';
 import '../services/stream_queue_logic.dart';
 import 'add_current_track.dart';
+import 'playback_options_sheet.dart';
 import 'desktop_playback_bar.dart' show DesktopVolumeControl;
 
 /// El "reproduciendo ahora" del escritorio: la misma información que
@@ -414,22 +415,53 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                   ),
           ),
           if (item != null) AddToPlaylistIconButton(item: item),
-          StreamBuilder<Duration?>(
-            stream: audioHandler.sleepTimerStream,
-            initialData: audioHandler.sleepTimerRemainingNow,
+          ValueListenableBuilder<int>(
+            valueListenable: audioHandler.repeatRemaining,
+            builder: (context, remaining, _) => IconButton(
+              tooltip: remaining > 0
+                  ? l10n.repeatCountRemaining(remaining)
+                  : l10n.repeatCountTitle,
+              icon: Icon(
+                Icons.repeat_one,
+                color: remaining > 0 ? const Color(0xFF8C9EFF) : Colors.white70,
+              ),
+              onPressed: () => showRepeatCountSheet(context, audioHandler),
+            ),
+          ),
+          StreamBuilder<double>(
+            stream: audioHandler.player.speedStream,
+            initialData: audioHandler.player.speed,
             builder: (context, snapshot) {
-              final active = snapshot.data != null;
+              final changed = (snapshot.data ?? 1.0) != 1.0;
               return IconButton(
-                tooltip: l10n.nowPlayingSleepTimerTitle,
+                tooltip: l10n.playbackSpeedTitle,
                 icon: Icon(
-                  active ? Icons.bedtime : Icons.bedtime_outlined,
-                  color: active ? const Color(0xFF8C9EFF) : Colors.white70,
+                  Icons.speed,
+                  color: changed ? const Color(0xFF8C9EFF) : Colors.white70,
                 ),
-                onPressed: () => active
-                    ? audioHandler.cancelSleepTimer()
-                    : showSleepTimerPicker(context, audioHandler),
+                onPressed: () => showPlaybackSpeedSheet(context, audioHandler),
               );
             },
+          ),
+          ValueListenableBuilder<int?>(
+            valueListenable: audioHandler.sleepTracksRemaining,
+            builder: (context, tracksLeft, _) => StreamBuilder<Duration?>(
+              stream: audioHandler.sleepTimerStream,
+              initialData: audioHandler.sleepTimerRemainingNow,
+              builder: (context, snapshot) {
+                final active = snapshot.data != null || tracksLeft != null;
+                return IconButton(
+                  tooltip: l10n.nowPlayingSleepTimerTitle,
+                  icon: Icon(
+                    active ? Icons.bedtime : Icons.bedtime_outlined,
+                    color: active ? const Color(0xFF8C9EFF) : Colors.white70,
+                  ),
+                  onPressed: () => active
+                      ? audioHandler.cancelSleepTimer()
+                      : showSleepTimerPicker(context, audioHandler),
+                );
+              },
+            ),
           ),
         ],
       ),
