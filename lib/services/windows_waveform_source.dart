@@ -86,7 +86,7 @@ Future<WaveformProcess> _startProcess(String exe, List<String> args) async =>
 /// `<exe>/ffmpeg/ffmpeg.exe` si existe (lo instala CMake/el instalador).
 String? locateBundledFfmpeg() {
   final dir = File(Platform.resolvedExecutable).parent.path;
-  final f = File('$dir\ffmpeg\ffmpeg.exe');
+  final f = File('$dir\\ffmpeg\\ffmpeg.exe');
   return f.existsSync() ? f.path : null;
 }
 
