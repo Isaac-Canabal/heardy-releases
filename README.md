@@ -10,7 +10,6 @@ Siempre la última versión:
 
 - **Android**: [`Heardy.apk`](../../releases/latest/download/Heardy.apk). Al instalar fuera de una tienda, Android pide permitir "orígenes desconocidos" para el navegador o el gestor de archivos.
 - **Windows**: [`Heardy-Setup.exe`](../../releases/latest/download/Heardy-Setup.exe). El instalador no está firmado con certificado, así que SmartScreen avisa de "editor desconocido" la primera vez: *Más información → Ejecutar de todas formas*.
-- **iOS**: no hay versión distribuida. Las releases pueden incluir un `Heardy-unsigned.ipa` sin firmar, experimental, que solo sirve para quien lo firme por su cuenta.
 
 Las releases se construyen automáticamente por GitHub Actions a partir de una etiqueta `vX.Y.Z` (ver `.github/workflows/release.yml`).
 
@@ -26,11 +25,12 @@ Las releases se construyen automáticamente por GitHub Actions a partir de una e
 ## Qué hace
 
 - **Biblioteca local**: una carpeta elegida una vez; escaneo incremental que reconoce archivos movidos o renombrados por el hash del audio; nada se borra solo.
-- **Reproducción**: segundo plano con controles del sistema, letras sincronizadas con traducción, cola reordenable, aleatorio, repetición, temporizador de apagado.
+- **Reproducción**: segundo plano con controles del sistema, letras sincronizadas (LRCLIB o, como fuente alternativa, NetEase Cloud Music) con traducción (MyMemory), cola reordenable, aleatorio, repetición, temporizador de apagado.
+- **Escuchar sin descargar**: streaming desde Explorar o la búsqueda en línea, en Android y Windows; requiere cuenta.
 - **Estadísticas** de escucha, con imagen para compartir.
 - **Escritorio (Windows)**: interfaz de tres columnas con panel "Reproduciendo ahora".
 - **Cuenta opcional**: sincroniza un índice de la biblioteca (títulos, playlists, historial), nunca el audio.
-- **Importar desde un enlace (opcional)**: usa un servidor de descargas; el audio importado acaba como un archivo más en tu carpeta. Lo que importes es responsabilidad tuya: solo contenido sobre el que tengas derechos.
+- **Importar desde un enlace (opcional)**: usa el servidor del proyecto y requiere una cuenta; el audio importado acaba como un archivo más en tu carpeta. Lo que importes es responsabilidad tuya: solo contenido sobre el que tengas derechos.
 
 ## Compilar desde el código fuente
 
