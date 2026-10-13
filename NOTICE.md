@@ -5,13 +5,27 @@ third-party components. This list is not exhaustive for transitive dependencies.
 
 ## GPL-3.0 components (Android)
 
-- **NewPipeExtractor** (https://github.com/TeamNewPipe/NewPipeExtractor), Copyright (C) the NewPipe contributors /
-  TeamNewPipe, licensed under GPL-3.0-or-later. Linked by the `heardy_yt_stream` plugin (`packages/heardy_yt_stream`) to
-  resolve audio stream URLs on the device. The corresponding source of this Heardy version is this repository.
-- **NewPipe** (https://github.com/TeamNewPipe/NewPipe), GPL-3.0-or-later. The proof-of-origin (poToken) generator in
-  `packages/heardy_yt_stream/android/src/main/kotlin/com/heardy/ytstream/potoken/` and the page
-  `packages/heardy_yt_stream/android/src/main/assets/po_token.html` are ported from NewPipe's BotGuard/WebView poToken
-  code, Copyright (C) the NewPipe contributors.
+- **NewPipeExtractor** (https://github.com/TeamNewPipe/NewPipeExtractor), by TeamNewPipe and the NewPipe contributors,
+  licensed under GPL-3.0-or-later. Linked unmodified (release v0.26.5, via JitPack) by the `heardy_yt_stream` plugin
+  (`packages/heardy_yt_stream`) to resolve audio stream URLs on the device. The corresponding source of this Heardy
+  version is this repository.
+- **NewPipe** (https://github.com/TeamNewPipe/NewPipe), by TeamNewPipe and the NewPipe contributors, licensed under
+  GPL-3.0-or-later. The following files are derived from NewPipe and were modified by Heardy in 2026 (each carries a
+  notice at the top). Upstream paths are relative to
+  `https://github.com/TeamNewPipe/NewPipe/blob/dev/app/src/main/`:
+  - `packages/heardy_yt_stream/android/src/main/kotlin/com/heardy/ytstream/potoken/PoTokenWebView.kt`, from
+    `java/org/schabi/newpipe/util/potoken/PoTokenWebView.kt` (package renamed; debug flag and log tag replaced).
+  - `.../potoken/PoTokenGenerator.kt`, from `java/org/schabi/newpipe/util/potoken/PoTokenGenerator.kt` (package renamed).
+  - `.../potoken/PoTokenException.kt`, from `java/org/schabi/newpipe/util/potoken/PoTokenException.kt` (package
+    renamed; a log-tag debug flag added).
+  - `.../potoken/JavaScriptUtil.kt`, from `java/org/schabi/newpipe/util/potoken/JavaScriptUtil.kt` (package renamed).
+  - `.../potoken/PoTokenProviderImpl.kt`, from `java/org/schabi/newpipe/util/potoken/PoTokenProviderImpl.kt`
+    (app-specific dependencies replaced by an injected context; extra client methods stubbed).
+  - `.../ytstream/DownloaderImpl.kt`, from `java/org/schabi/newpipe/DownloaderImpl.java` (rewritten in Kotlin on
+    OkHttp, without cookies, restricted mode or the ReCaptcha flow).
+  - `packages/heardy_yt_stream/android/src/main/assets/po_token.html`, from `assets/po_token.html` (only the notice
+    was added).
+  Heardy is not affiliated with or endorsed by the NewPipe project.
 
 ## Other Android libraries (via `packages/heardy_yt_stream`)
 

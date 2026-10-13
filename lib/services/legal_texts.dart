@@ -38,7 +38,7 @@ const List<LegalSection> termsSections = [
         'otros usuarios.\n\n'
         'Cuando usas la importación desde enlaces, el servidor de extracción obtiene el archivo que '
         'pides solo para ti y lo entrega a tu dispositivo, conservando como máximo una caché técnica '
-        'temporal. La función opcional de escucha en streaming resuelve la transmisión en tu propio '
+        'temporal de tamaño limitado. La función opcional de escucha en streaming resuelve la transmisión en tu propio '
         'dispositivo.',
   ),
   LegalSection(
@@ -50,19 +50,25 @@ const List<LegalSection> termsSections = [
         '• tienes derecho a obtener y conservar una copia del contenido (porque lo has adquirido, '
         'cuentas con una licencia que lo permite, es de tu autoría o está en el dominio público);\n'
         '• respetas las condiciones de uso de la plataforma de origen y la legislación aplicable en '
-        'materia de derechos de autor y derechos conexos, en particular la Ley 23 de 1982 y la Ley '
-        '1915 de 2018 de Colombia y las normas equivalentes de tu país;\n'
+        'materia de derechos de autor y derechos conexos, en particular la Ley 23 de 1982 de '
+        'Colombia y las normas equivalentes de tu país;\n'
         '• usas el contenido importado solo para uso personal y privado, sin fines comerciales y sin '
         'redistribuirlo ni comunicarlo públicamente.\n\n'
         'Estas funciones no están pensadas para obtener obras sin autorización, y el operador puede '
         'bloquear cualquier identificador de origen (véase la sección 9).\n\n'
-        'El servidor actúa como una herramienta técnica que ejecuta, a petición expresa tuya y para '
-        'ti, la obtención de un archivo concreto; el operador no selecciona, controla ni aprueba los '
-        'enlaces que introduces, no conserva el audio más allá de una caché técnica temporal, no lo '
-        'pone a disposición de otros usuarios y no adquiere ningún derecho sobre él. El operador puede '
-        'limitar, suspender o retirar esta función en cualquier momento, bloquear enlaces o cuentas '
-        'ante indicios de uso indebido, y atenderá los requerimientos legítimos de autoridades y '
-        'titulares de derechos.',
+        'El operador no verifica estas declaraciones. Si no puedes hacerlas, no uses estas '
+        'funciones.\n\n'
+        'El servidor ejecuta, a petición tuya y para ti, la descarga de un archivo concreto que tú '
+        'identificas. El operador no revisa previamente cada enlace y no adquiere ningún derecho '
+        'sobre el archivo. El servidor conserva el archivo solicitado en una caché de tamaño '
+        'limitado, identificada únicamente por el identificador del vídeo y no vinculada a tu '
+        'cuenta, hasta que se reemplaza al alcanzarse el límite o el operador la borra; no lo ofrece '
+        'a otros usuarios como catálogo. El operador puede limitar, suspender o retirar esta función '
+        'en cualquier momento, bloquear identificadores, enlaces o cuentas ante indicios de uso '
+        'indebido, y atenderá los requerimientos legítimos de autoridades y titulares de derechos '
+        'conforme a la sección 9.\n\n'
+        'Heardy no está afiliado, respaldado ni patrocinado por ninguna de las plataformas de '
+        'terceros cuyo contenido un usuario pueda enlazar, ni por Google ni por NewPipe.',
   ),
   LegalSection(
     '4. Uso permitido y prohibiciones',
@@ -74,7 +80,9 @@ const List<LegalSection> termsSections = [
         'Heardy para infringir derechos de terceros o la ley.\n\n'
         'El código fuente de Heardy se publica bajo la licencia GPL-3.0. Esa licencia regula el uso del '
         'código; estos términos regulan el uso de la aplicación compilada distribuida por el operador '
-        'y de los servicios asociados.',
+        'y de los servicios asociados. Las prohibiciones de esta sección se aplican al uso de los '
+        'servicios del operador (servidor, cuenta) y de la aplicación compilada que él distribuye, y '
+        'no limitan los derechos que te concede la GPL-3.0 sobre el código fuente.',
   ),
   LegalSection(
     '5. Cuenta opcional',
@@ -93,7 +101,12 @@ const List<LegalSection> termsSections = [
     '6. Edad mínima',
     'Para usar Heardy debes tener al menos 14 años. Para crear la cuenta opcional debes ser mayor de '
         'edad conforme a la ley de tu país; los mayores de 14 y menores de edad solo pueden crearla con '
-        'la autorización de sus padres o tutores, quienes responden de ese uso.',
+        'la autorización de sus padres o tutores, quienes responden de ese uso.\n\n'
+        'Si eres menor de edad, las secciones 8 (indemnidad) y 11 (resolución de controversias) no se '
+        'aplican a tu cuenta como se aplican a los adultos: la indemnidad no te es aplicable y '
+        'quienes responden por la cuenta son tus representantes legales, que conservan en todo '
+        'momento el derecho de acudir a la Superintendencia de Industria y Comercio o a la '
+        'jurisdicción competente.',
   ),
   LegalSection(
     '7. Sin garantías y limitación de responsabilidad',
@@ -107,32 +120,34 @@ const List<LegalSection> termsSections = [
   LegalSection(
     '8. Responsabilidad del usuario por el contenido e indemnidad',
     'Todo el contenido que reproduces, importas, almacenas o sincronizas con Heardy es tuyo o lo '
-        'obtienes tú: el operador no lo elige, no lo revisa y no lo aloja. Eres el único responsable de '
-        'que ese contenido y el uso que hagas de él respeten los derechos de terceros (en particular '
-        'los derechos de autor y conexos), las condiciones de las plataformas de origen y la ley. Si '
-        'importas o conservas contenido sin tener derecho a ello, la responsabilidad es exclusivamente '
-        'tuya.\n\n'
-        'Te comprometes a mantener indemne al operador, a sus colaboradores y proveedores frente a '
-        'cualquier reclamación, sanción, daño o gasto (incluidos honorarios legales razonables) derivado '
-        'del contenido que hayas reproducido, importado, almacenado o compartido a través de Heardy, de '
-        'tu incumplimiento de estos términos o de tu infracción de derechos de terceros o de la ley. El '
-        'operador podrá cooperar con autoridades y titulares de derechos en la medida que la ley exija.',
+        'obtienes tú: el operador no lo revisa previamente ni lo pone a disposición de otros usuarios. '
+        'Eres el único responsable de que ese contenido y el uso que hagas de él respeten los '
+        'derechos de terceros (en particular los derechos de autor y conexos), las condiciones de las '
+        'plataformas de origen y la ley. Si importas o conservas contenido sin tener derecho a ello, '
+        'la responsabilidad es exclusivamente tuya.\n\n'
+        'Si tu uso infractor genera una reclamación contra el operador, te comprometes a reembolsarle '
+        'los daños y costos razonables y documentados que se deriven directamente de ello, salvo que '
+        'hayan sido causados por dolo o culpa grave del operador. Esta cláusula no aplica a menores de '
+        'edad ni limita derechos irrenunciables del consumidor. El operador podrá cooperar con '
+        'autoridades y titulares de derechos en la medida que la ley exija.',
   ),
   LegalSection(
     '9. Derechos de autor, uso aceptable y retiro de contenido',
     'Respeto de la propiedad intelectual\n'
         'Heardy respeta los derechos de autor y espera lo mismo de quienes lo usan. No uses la '
         'importación desde enlaces ni el streaming para obras sobre las que no tengas derecho, ni para '
-        'redistribuirlas.\n\n'
+        'redistribuirlas. El procedimiento descrito en esta sección es un compromiso voluntario del '
+        'operador.\n\n'
         'Qué se puede notificar\n'
         '• Un identificador de origen (por ejemplo, el identificador de un vídeo) que el servidor de '
         'extracción debería dejar de servir.\n'
         '• Un dato del índice sincronizado de un usuario (por ejemplo, un enlace de origen o un nombre '
         'de usuario).\n'
         '• La conducta de una cuenta.\n'
-        'La escucha en streaming, que se resuelve en el dispositivo del usuario, y los archivos que ya '
-        'están en un dispositivo quedan fuera del control del operador: para ellos, la reclamación debe '
-        'dirigirse a la plataforma de origen.\n\n'
+        'El streaming se resuelve en tu dispositivo y no pasa por el servidor del operador; el operador '
+        'puede desactivar esa función en futuras versiones y atenderá las reclamaciones sobre ella '
+        'remitiéndolas, si procede, a la plataforma de origen. Los archivos que ya están en un '
+        'dispositivo quedan fuera del control del operador.\n\n'
         'Qué debe contener la notificación\n'
         '• Identificación y datos de contacto de quien reclama (y prueba de su representación, si '
         'actúa en nombre de otro).\n'
@@ -173,19 +188,13 @@ const List<LegalSection> termsSections = [
   ),
   LegalSection(
     '11. Ley aplicable y resolución de controversias',
-    'Estos términos se rigen por las leyes de la República de Colombia. Antes de iniciar cualquier '
-        'acción, las partes intentarán resolver la controversia de forma directa, por escrito (tú a '
-        '$legalContactEmail; el operador al correo de tu cuenta), durante treinta (30) días.\n\n'
-        'Si no hay acuerdo, toda controversia derivada de estos términos o del uso de Heardy se '
-        'resolverá mediante arbitraje en derecho conforme a la Ley 1563 de 2012, ante el Centro de '
-        'Arbitraje y Conciliación de la Cámara de Comercio de Bogotá, por un árbitro único, con sede en '
-        'Bogotá y en español. El laudo será definitivo y vinculante; cada parte asume sus costos salvo '
-        'que el laudo disponga otra cosa.\n\n'
-        'Cuando actúes como consumidor y la ley que te proteja te reconozca el derecho a acudir a la '
-        'jurisdicción ordinaria o a la autoridad de protección al consumidor (en Colombia, la '
-        'Superintendencia de Industria y Comercio), este arbitraje es opcional para ti y no limita ese '
-        'derecho. En la medida permitida por la ley, las controversias se resuelven de forma '
-        'individual, no mediante acciones colectivas o de grupo.',
+    'Estos términos se rigen por las leyes de la República de Colombia. Antes de iniciar un '
+        'procedimiento, las partes intentarán resolver la controversia de forma directa, por escrito '
+        '(tú a $legalContactEmail; el operador al correo de tu cuenta), durante treinta (30) días. Esta '
+        'etapa no limita tu derecho a acudir en cualquier momento a la Superintendencia de Industria y '
+        'Comercio, a un juez o a una autoridad de protección de datos.\n\n'
+        'Los usuarios consumidores conservan todos los derechos que la legislación imperativa que los '
+        'proteja les reconozca.',
   ),
   LegalSection(
     '12. Uso de inteligencia artificial en el desarrollo',
@@ -197,7 +206,8 @@ const List<LegalSection> termsSections = [
   LegalSection(
     '13. Cambios y aceptación',
     'La versión vigente, con su fecha, está siempre publicada en la web del proyecto y en esta '
-        'pantalla. Si el cambio es sustancial, la aplicación te pedirá aceptarlo de nuevo. Aceptas '
+        'pantalla. Si el cambio es sustancial, la aplicación te pedirá aceptarlo de nuevo y se '
+        'registrará la nueva versión aceptada y la fecha. Aceptas '
         'estos términos al pulsar «Aceptar y continuar» la primera vez que abres la app (se registra la '
         'versión aceptada y la fecha). Si no estás de acuerdo, no uses Heardy.',
   ),
@@ -209,11 +219,18 @@ const List<LegalSection> privacySections = [
     '$legalOperator, Colombia. Contacto para asuntos de privacidad: $legalContactEmail.',
   ),
   LegalSection(
-    '2. Sin cuenta, nada sale de tu dispositivo',
-    'Si usas Heardy sin cuenta, toda tu información (biblioteca, playlists, historial, estadísticas, '
-        'ajustes) se guarda solo en tu dispositivo y el operador no recibe ningún dato. Las únicas '
-        'conexiones son las necesarias para obtener letras y traducciones, enviando el título, el '
-        'artista y la duración de la canción a servicios de terceros, sin ningún identificador tuyo.',
+    '2. Uso sin cuenta: tu biblioteca no sale de tu dispositivo',
+    'Si usas Heardy sin crear una cuenta, toda la información (tu biblioteca, playlists, historial '
+        'de reproducción, estadísticas, ajustes) se guarda únicamente en tu dispositivo y el operador '
+        'no recibe ninguno de esos datos. La aplicación sí hace algunas conexiones a internet en este '
+        'modo: consulta a GitHub si hay una versión nueva (lo que expone tu dirección IP a GitHub; en '
+        'Windows también actualiza desde GitHub su componente yt-dlp empaquetado); busca letras en '
+        'LRCLIB y, como fuente alternativa, en NetEase Cloud Music, enviando el título y el artista de '
+        'la canción (y su duración a LRCLIB); si pides una traducción, envía el texto de cada línea de '
+        'la letra al servicio MyMemory; y si usas «Escuchar» (streaming), se conecta directamente desde '
+        'tu dispositivo a la plataforma de origen del contenido. Ninguna de estas conexiones envía tu '
+        'biblioteca ni un identificador de cuenta. Importar desde enlaces, la búsqueda en línea y '
+        'Explorar requieren una cuenta (véase la sección 3).',
   ),
   LegalSection(
     '3. Qué tratamos si creas una cuenta',
@@ -221,25 +238,30 @@ const List<LegalSection> privacySections = [
         'tu contraseña.\n'
         '• Índice de tu biblioteca: títulos, artistas, álbum, duración, una huella del audio que no '
         'permite reconstruirlo, playlists y el enlace de origen cuando una canción se importó desde un '
-        'enlace. Nunca rutas de archivos ni el audio.\n'
+        'enlace. Nunca rutas de archivos ni el audio de tu biblioteca.\n'
         '• Historial de reproducción: qué canción, cuándo y durante cuánto tiempo.\n'
         '• Nombre de usuario y relaciones de amistad.\n'
         '• «Escuchando ahora», solo si lo activas: visible solo para tus amigos y caduca al terminar la '
         'canción. Está desactivado por defecto.\n'
+        '• Uso de Explorar, importar y buscar: las búsquedas que haces, los enlaces que importas, el '
+        'país que eliges en Explorar y los identificadores de vídeo de tus canciones más escuchadas '
+        'que tienen enlace de origen (para generar recomendaciones). Se procesan en el servidor para '
+        'atender cada solicitud.\n'
         '• Datos técnicos mínimos para operar el servicio (cuotas por cuenta, marcas de sincronización, '
         'registros que nunca combinan tu identidad con el contenido de tus datos).',
   ),
   LegalSection(
     'Resumen de lo que se recoge',
-    'Sin cuenta, nada (salvo título, artista y duración de la canción para pedir letras). Con cuenta: '
+    'Sin cuenta, el operador no recibe nada (la aplicación solo contacta con terceros para '
+        'versiones, letras, traducciones y streaming, como se explica en la sección 2). Con cuenta: '
         'tu correo (a través del proveedor de identidad), el índice de tu biblioteca, tu historial de '
-        'reproducción, tu nombre de usuario, tus amistades, «escuchando ahora» si lo activas, y los '
-        'contadores técnicos de uso. Nunca el audio, nunca rutas de archivos, nunca analítica ni '
-        'publicidad.',
+        'reproducción, tu nombre de usuario, tus amistades, «escuchando ahora» si lo activas, lo que '
+        'buscas, importas o pides a Explorar, y los contadores técnicos de uso. Nunca el audio de tu '
+        'biblioteca, nunca rutas de archivos, nunca analítica ni publicidad.',
   ),
   LegalSection(
     '4. Qué no recogemos',
-    'Tus archivos de audio; rutas o nombres de carpetas; analítica, seguimiento o publicidad (no hay '
+    'El audio de tu biblioteca (nunca se sube); rutas o nombres de carpetas; analítica, seguimiento o publicidad (no hay '
         'ningún SDK de ese tipo); contactos, ubicación ni micrófono; datos de pago.',
   ),
   LegalSection(
@@ -272,7 +294,8 @@ const List<LegalSection> privacySections = [
     'Los datos de la cuenta se conservan mientras exista. «Escuchando ahora» caduca solo. Los '
         'registros técnicos se conservan como máximo 30 días. Al borrar tus datos se eliminan de '
         'inmediato de la base de datos; las copias de seguridad automáticas se purgan en un máximo de '
-        '30 días adicionales.',
+        '30 días adicionales. Si el servicio opcional dejara de prestarse, los datos de todas las '
+        'cuentas se eliminarían en ese mismo plazo.',
   ),
   LegalSection(
     '9. Tus derechos',
@@ -294,7 +317,11 @@ const List<LegalSection> privacySections = [
   LegalSection(
     '10. Seguridad y menores',
     'La comunicación con el servidor va cifrada; el acceso exige un token de sesión que caduca; el '
-        'servidor no almacena contraseñas ni audio. Heardy no está dirigido a menores de 14 años; la '
+        'servidor no guarda contraseñas. Al importar desde un enlace, el servidor descarga el archivo '
+        'que pides para entregártelo y lo conserva en una caché técnica de tamaño limitado, '
+        'identificada únicamente por el identificador del vídeo y no vinculada a tu cuenta, hasta que '
+        'se reemplaza al alcanzarse el límite o el operador la borra; no se ofrece a otros usuarios '
+        'como catálogo. Heardy no está dirigido a menores de 14 años; la '
         'cuenta opcional es para mayores de edad, o para mayores de 14 con autorización de sus padres o '
         'tutores (artículo 7 de la Ley 1581 de 2012). Si crees que un menor facilitó datos sin esa '
         'autorización, escríbenos y los eliminaremos.',
