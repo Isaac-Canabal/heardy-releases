@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../services/support_links.dart';
 import '../providers/auth_provider.dart';
 import '../providers/music_provider.dart';
 import '../providers/settings_provider.dart';
@@ -16,7 +18,6 @@ import '../services/audio_effects_service.dart';
 import '../services/audio_player_handler.dart';
 import '../services/database_helper.dart';
 import '../theme/app_theme.dart';
-import '../services/artwork_repair_service.dart';
 import '../services/download_source.dart';
 import '../services/storage_service.dart';
 import '../l10n/app_localizations.dart';
@@ -281,65 +282,6 @@ class SettingsScreen extends StatelessWidget {
                   ),
                   onChanged: settings.setDynamicNowPlayingColor,
                 ),
-                const Divider(height: 24, color: Colors.white12),
-                SwitchListTile(
-                  key: const Key('normalize_volume_switch'),
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: AppTheme.primaryLight,
-                  value: settings.normalizeVolume,
-                  title: Text(
-                    l10n.settingsNormalizeVolume,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                  subtitle: Text(
-                    l10n.settingsNormalizeVolumeBody,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
-                  ),
-                  onChanged: (v) {
-                    settings.setNormalizeVolume(v);
-                    context.read<AudioPlayerHandler>().setNormalizeVolume(v);
-                  },
-                ),
-                if (context.read<AudioPlayerHandler>().supportsSkipSilence)...[
-                const Divider(height: 24, color: Colors.white12),
-                SwitchListTile(
-                  key: const Key('skip_silence_switch'),
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: AppTheme.primaryLight,
-                  value: settings.skipSilence,
-                  title: Text(
-                    l10n.settingsSkipSilence,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                  subtitle: Text(
-                    l10n.settingsSkipSilenceBody,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
-                  ),
-                  onChanged: (v) {
-                    settings.setSkipSilence(v);
-                    context.read<AudioPlayerHandler>().setSkipSilence(v);
-                  },
-                ),
-                ],
-                const Divider(height: 24, color: Colors.white12),
-                SwitchListTile(
-                  key: const Key('track_fade_switch'),
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: AppTheme.primaryLight,
-                  value: settings.trackFade,
-                  title: Text(
-                    l10n.settingsTrackFade,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                  subtitle: Text(
-                    l10n.settingsTrackFadeBody,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
-                  ),
-                  onChanged: (v) {
-                    settings.setTrackFade(v);
-                    context.read<AudioPlayerHandler>().setTrackFade(v);
-                  },
-                ),
               ],
             ),
           ),
@@ -514,8 +456,6 @@ class SettingsScreen extends StatelessWidget {
                     onPressed: () => _pickLibraryFolder(context),
                   ),
                 ),
-                const SizedBox(height: 8),
-                const _ArtworkRepairButton(),
               ],
             ),
           ),
@@ -600,6 +540,10 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 28),
+          _SectionTitle(l10n.supportSectionTitle),
+          const SizedBox(height: 10),
+          const _SupportCard(),
+          const SizedBox(height: 28),
           _SectionTitle(l10n.settingsSectionAbout),
           const SizedBox(height: 10),
           Container(
@@ -665,6 +609,55 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SupportCard extends StatelessWidget {
+  const _SupportCard();
+
+  Future<void> _open(BuildContext context) async {
+    final l10n = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final ok = await launchUrl(Uri.parse(supportDonationUrl), mode: LaunchMode.externalApplication);
+      if (ok) return;
+    } catch (e) {
+      appLog('SettingsScreen: no se pudo abrir el enlace de apoyo: $e');
+    }
+    messenger.showSnackBar(SnackBar(content: Text(l10n.supportOpenError)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    return Container(
+      decoration: AppTheme.glassCard(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            l10n.supportBody,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+              icon: const Icon(Icons.favorite_border_rounded, size: 18),
+              label: Text(l10n.supportButton, style: const TextStyle(fontWeight: FontWeight.w600)),
+              onPressed: () => _open(context),
             ),
           ),
         ],
@@ -1150,6 +1143,8 @@ class _AudioEffectsSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final fx = context.watch<AudioEffectsService>();
+    final settings = context.watch<SettingsProvider>();
+    final handler = context.read<AudioPlayerHandler>();
 
     return Container(
       decoration: AppTheme.glassCard(),
@@ -1157,6 +1152,65 @@ class _AudioEffectsSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          SwitchListTile(
+            key: const Key('normalize_volume_switch'),
+            contentPadding: EdgeInsets.zero,
+            activeThumbColor: AppTheme.primaryLight,
+            value: settings.normalizeVolume,
+            title: Text(
+              l10n.settingsNormalizeVolume,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+            subtitle: Text(
+              l10n.settingsNormalizeVolumeBody,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+            ),
+            onChanged: (v) {
+              settings.setNormalizeVolume(v);
+              handler.setNormalizeVolume(v);
+            },
+          ),
+          if (handler.supportsSkipSilence) ...[
+            const Divider(height: 24, color: Colors.white12),
+            SwitchListTile(
+              key: const Key('skip_silence_switch'),
+              contentPadding: EdgeInsets.zero,
+              activeThumbColor: AppTheme.primaryLight,
+              value: settings.skipSilence,
+              title: Text(
+                l10n.settingsSkipSilence,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+              ),
+              subtitle: Text(
+                l10n.settingsSkipSilenceBody,
+                style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+              ),
+              onChanged: (v) {
+                settings.setSkipSilence(v);
+                handler.setSkipSilence(v);
+              },
+            ),
+          ],
+          const Divider(height: 24, color: Colors.white12),
+          SwitchListTile(
+            key: const Key('track_fade_switch'),
+            contentPadding: EdgeInsets.zero,
+            activeThumbColor: AppTheme.primaryLight,
+            value: settings.trackFade,
+            title: Text(
+              l10n.settingsTrackFade,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+            subtitle: Text(
+              l10n.settingsTrackFadeBody,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+            ),
+            onChanged: (v) {
+              settings.setTrackFade(v);
+              handler.setTrackFade(v);
+            },
+          ),
+          const Divider(height: 24, color: Colors.white12),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             activeThumbColor: AppTheme.primaryLight,
@@ -1747,88 +1801,6 @@ class _CustomThemeSheetState extends State<_CustomThemeSheet> {
           if (c != null) onValid(c);
         },
       ),
-    );
-  }
-}
-
-
-/// Vuelve a bajar las carátulas de las canciones descargadas que no la
-/// tienen (ver ArtworkRepairService). Un solo toque, progreso en el propio
-/// botón, y las listas se refrescan al terminar.
-class _ArtworkRepairButton extends StatefulWidget {
-  const _ArtworkRepairButton();
-
-  @override
-  State<_ArtworkRepairButton> createState() => _ArtworkRepairButtonState();
-}
-
-class _ArtworkRepairButtonState extends State<_ArtworkRepairButton> {
-  bool _working = false;
-  int _done = 0;
-  int _total = 0;
-
-  Future<void> _repair() async {
-    final l10n = AppLocalizations.of(context)!;
-    final messenger = ScaffoldMessenger.of(context);
-    final music = context.read<MusicProvider>();
-    setState(() {
-      _working = true;
-      _done = 0;
-      _total = 0;
-    });
-    var repaired = 0;
-    try {
-      repaired = await ArtworkRepairService().repairMissing(
-        onProgress: (done, total) {
-          if (!mounted) return;
-          setState(() {
-            _done = done;
-            _total = total;
-          });
-        },
-      );
-    } catch (e) {
-      appLog('SettingsScreen: no se pudieron recuperar carátulas: $e');
-    } finally {
-      if (mounted) setState(() => _working = false);
-    }
-    if (repaired > 0) music.notifyLibraryChanged();
-    messenger.showSnackBar(SnackBar(content: Text(l10n.settingsRepairArtworkDone(repaired))));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          l10n.settingsRepairArtworkBody,
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12, height: 1.4),
-        ),
-        const SizedBox(height: 8),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-            icon: _working
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.image_search_rounded, size: 18),
-            label: Text(
-              _working && _total > 0
-                  ? l10n.settingsRepairArtworkWorking(_done, _total)
-                  : l10n.settingsRepairArtwork,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            onPressed: _working ? null : _repair,
-          ),
-        ),
-      ],
     );
   }
 }

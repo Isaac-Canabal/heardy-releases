@@ -4,7 +4,7 @@
 /// cuando cambie el texto ahí, sube [legalVersion] aquí y en
 /// `web/src/content/downloads.ts` (`termsVersion`) a la vez — la app vuelve a
 /// pedir la aceptación a quien tenga registrada una versión anterior.
-const String legalVersion = '2026-09-19';
+const String legalVersion = '2026-10-13';
 
 const String legalOperator = 'Vainastech';
 const String legalContactEmail = 'vainastech@gmail.com';
@@ -32,9 +32,14 @@ const List<LegalSection> termsSections = [
   LegalSection(
     '2. Heardy es un reproductor local',
     'Heardy no es un servicio de música por suscripción ni un catálogo de contenidos. Reproduce '
-        'únicamente archivos que ya están en el almacenamiento de tu dispositivo, en la carpeta que '
-        'eliges. El operador no aloja, almacena, transmite ni distribuye ningún archivo de audio: el '
-        'audio nunca sale de tu dispositivo, ni siquiera cuando usas la cuenta opcional.',
+        'los archivos de audio que están en la carpeta de tu dispositivo que eliges, y el audio de tu '
+        'biblioteca nunca se sube a ningún servidor, ni siquiera cuando usas la cuenta opcional. El '
+        'operador no mantiene un catálogo de contenidos ni pone ningún contenido a disposición de '
+        'otros usuarios.\n\n'
+        'Cuando usas la importación desde enlaces, el servidor de extracción obtiene el archivo que '
+        'pides solo para ti y lo entrega a tu dispositivo, conservando como máximo una caché técnica '
+        'temporal. La función opcional de escucha en streaming resuelve la transmisión en tu propio '
+        'dispositivo.',
   ),
   LegalSection(
     '3. Importación desde enlaces y contenido de terceros',
@@ -49,6 +54,8 @@ const List<LegalSection> termsSections = [
         '1915 de 2018 de Colombia y las normas equivalentes de tu país;\n'
         '• usas el contenido importado solo para uso personal y privado, sin fines comerciales y sin '
         'redistribuirlo ni comunicarlo públicamente.\n\n'
+        'Estas funciones no están pensadas para obtener obras sin autorización, y el operador puede '
+        'bloquear cualquier identificador de origen (véase la sección 9).\n\n'
         'El servidor actúa como una herramienta técnica que ejecuta, a petición expresa tuya y para '
         'ti, la obtención de un archivo concreto; el operador no selecciona, controla ni aprueba los '
         'enlaces que introduces, no conserva el audio más allá de una caché técnica temporal, no lo '
@@ -65,8 +72,9 @@ const List<LegalSection> termsSections = [
         'o sobrecargarlo; usar la función de amigos o de nombre de usuario para acosar, suplantar o '
         'localizar a otras personas, o elegir nombres ofensivos o que induzcan a confusión; y usar '
         'Heardy para infringir derechos de terceros o la ley.\n\n'
-        'El código fuente se publica bajo la licencia MIT. Esa licencia regula el uso del código; estos '
-        'términos regulan el uso de la aplicación compilada y de los servicios asociados.',
+        'El código fuente de Heardy se publica bajo la licencia GPL-3.0. Esa licencia regula el uso del '
+        'código; estos términos regulan el uso de la aplicación compilada distribuida por el operador '
+        'y de los servicios asociados.',
   ),
   LegalSection(
     '5. Cuenta opcional',
@@ -111,13 +119,49 @@ const List<LegalSection> termsSections = [
         'operador podrá cooperar con autoridades y titulares de derechos en la medida que la ley exija.',
   ),
   LegalSection(
-    '9. Reclamaciones de derechos de autor',
-    'Si consideras que un enlace de origen almacenado en el índice de un usuario, un nombre de '
-        'usuario u otro dato gestionado por el operador infringe tus derechos, escribe a '
-        '$legalContactEmail con tu identificación, la obra afectada, el dato señalado y una declaración '
-        'de buena fe. El operador acusará recibo y responderá en un máximo de quince días hábiles; si la '
-        'reclamación es fundada retirará el dato e informará al usuario afectado, que podrá responder. '
-        'Las reclamaciones abusivas podrán desestimarse y las cuentas reincidentes suspenderse.',
+    '9. Derechos de autor, uso aceptable y retiro de contenido',
+    'Respeto de la propiedad intelectual\n'
+        'Heardy respeta los derechos de autor y espera lo mismo de quienes lo usan. No uses la '
+        'importación desde enlaces ni el streaming para obras sobre las que no tengas derecho, ni para '
+        'redistribuirlas.\n\n'
+        'Qué se puede notificar\n'
+        '• Un identificador de origen (por ejemplo, el identificador de un vídeo) que el servidor de '
+        'extracción debería dejar de servir.\n'
+        '• Un dato del índice sincronizado de un usuario (por ejemplo, un enlace de origen o un nombre '
+        'de usuario).\n'
+        '• La conducta de una cuenta.\n'
+        'La escucha en streaming, que se resuelve en el dispositivo del usuario, y los archivos que ya '
+        'están en un dispositivo quedan fuera del control del operador: para ellos, la reclamación debe '
+        'dirigirse a la plataforma de origen.\n\n'
+        'Qué debe contener la notificación\n'
+        '• Identificación y datos de contacto de quien reclama (y prueba de su representación, si '
+        'actúa en nombre de otro).\n'
+        '• Identificación de la obra afectada.\n'
+        '• Identificación del identificador de origen, la URL o el dato señalado.\n'
+        '• Declaración de buena fe de que el uso no está autorizado por el titular, su representante '
+        'o la ley.\n'
+        '• Declaración de que la información es exacta y, bajo la responsabilidad de quien reclama, de '
+        'que es el titular de los derechos o está autorizado para actuar en su nombre.\n'
+        '• Firma (basta el nombre escrito).\n'
+        'Envíala a $legalContactEmail.\n\n'
+        'Plazos\n'
+        'El operador acusará recibo en un máximo de tres (3) días hábiles. Si la notificación está '
+        'completa y es fundada, bloqueará el identificador en el servidor de extracción en un máximo de '
+        'cinco (5) días hábiles desde que la reciba completa. Si está incompleta, pedirá los datos que '
+        'falten.\n\n'
+        'Contranotificación\n'
+        'Cuando la cuenta afectada sea identificable, el operador informará al usuario, que podrá '
+        'responder con la misma información y una declaración de buena fe. El bloqueo se mantiene salvo '
+        'que la respuesta demuestre que el uso es lícito o que quien reclamó retire su reclamación.\n\n'
+        'Reincidentes\n'
+        'Tras tres (3) notificaciones fundadas contra contenido vinculado a una misma cuenta, el '
+        'operador suspenderá su acceso a los servicios opcionales.\n\n'
+        'Notificaciones abusivas o falsas\n'
+        'Las notificaciones abusivas o falsas podrán desestimarse, y quien reclame a sabiendas de forma '
+        'falsa responde por los daños que cause.\n\n'
+        'Autoridades competentes\n'
+        'El operador atenderá los requerimientos de las autoridades competentes. Nada de esta sección '
+        'limita el derecho de los titulares a acudir a los jueces o a las autoridades competentes.',
   ),
   LegalSection(
     '10. Suspensión y terminación',

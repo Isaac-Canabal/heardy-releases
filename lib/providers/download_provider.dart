@@ -807,7 +807,12 @@ class DownloadProvider extends ChangeNotifier {
       // permiso SAF ya no es válido) — buscar un reemplazo no arregla nada
       // aquí, y como TODO trabajo fallaría por la misma razón, sería una
       // búsqueda desperdiciada por cada canción de la tanda.
-      if (error.kind != DownloadSourceErrorKind.notConfigured && await _tryFallbackSearch(job)) {
+      //
+      // `blockedLegal` tampoco busca reemplazo: otra subida de la misma obra
+      // eludiría el retiro.
+      if (error.kind != DownloadSourceErrorKind.notConfigured &&
+          error.kind != DownloadSourceErrorKind.blockedLegal &&
+          await _tryFallbackSearch(job)) {
         await refreshQueue();
         return;
       }

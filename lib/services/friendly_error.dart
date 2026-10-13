@@ -151,6 +151,7 @@ String downloadErrorCode(DownloadSourceErrorKind kind, {int? statusCode}) {
     DownloadSourceErrorKind.serviceUnavailable => 'UNAVAIL',
     DownloadSourceErrorKind.serverCapacityExhausted => 'CAP',
     DownloadSourceErrorKind.songTooLong => 'LONG',
+    DownloadSourceErrorKind.blockedLegal => 'LEGAL',
     DownloadSourceErrorKind.cancelled => 'CANCEL',
   };
   return 'E-DL-$short${statusCode != null ? '-$statusCode' : ''}';
@@ -215,6 +216,8 @@ String downloadErrorMessage(
           'Los servidores han agotado su capacidad de este mes. Vuelve a intentarlo más adelante.';
     case DownloadSourceErrorKind.songTooLong:
       return 'Esta canción es demasiado larga para descargarla desde el servidor.';
+    case DownloadSourceErrorKind.blockedLegal:
+      return 'Este contenido no está disponible por una reclamación de derechos de autor.';
     case DownloadSourceErrorKind.cancelled:
       return 'Descarga cancelada';
   }
@@ -544,6 +547,8 @@ String localizedDownloadMessage(
       return (isEs ? safeServerText(serverText) : null) ?? l10n.dlCapacity;
     case DownloadSourceErrorKind.songTooLong:
       return l10n.dlSongTooLong;
+    case DownloadSourceErrorKind.blockedLegal:
+      return l10n.dlBlockedLegal;
     case DownloadSourceErrorKind.cancelled:
       return l10n.dlCancelled;
   }

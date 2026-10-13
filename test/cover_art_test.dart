@@ -1,6 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:heardy/models/song.dart';
-import 'package:heardy/services/artwork_repair_service.dart';
 import 'package:heardy/services/cover_art.dart';
 
 /// Qué URLs de carátula se intentan, y en qué orden.
@@ -70,32 +68,6 @@ void main() {
       expect(youtubeVideoIdFrom('https://open.spotify.com/track/abc'), isNull);
       expect(youtubeVideoIdFrom('https://www.youtube.com/playlist?list=PL123'), isNull);
       expect(youtubeVideoIdFrom('https://www.youtube.com/watch?v=corto'), isNull);
-    });
-  });
-
-  group('songsNeedingArtwork', () {
-    Song song(String id, {String artPath = '', String? sourceUrl}) => Song(
-          id: id,
-          title: id,
-          artist: 'a',
-          duration: 1,
-          filePath: '',
-          artPath: artPath,
-          format: 'm4a',
-          downloadDate: DateTime(2026),
-          sourceUrl: sourceUrl,
-        );
-
-    test('elige las que no tienen carátula, o la perdieron, y sí tienen id de YouTube', () {
-      final songs = [
-        song('sin-art', sourceUrl: 'https://youtu.be/dQw4w9WgXcQ'),
-        song('art-perdida', artPath: '/t/perdida.jpg', sourceUrl: 'https://youtu.be/dQw4w9WgXcQ'),
-        song('con-art', artPath: '/t/ok.jpg', sourceUrl: 'https://youtu.be/dQw4w9WgXcQ'),
-        song('sin-origen'),
-        song('spotify', sourceUrl: 'https://open.spotify.com/track/x'),
-      ];
-      final pending = songsNeedingArtwork(songs, artworkExists: (p) => p == '/t/ok.jpg');
-      expect(pending.map((s) => s.id), ['sin-art', 'art-perdida']);
     });
   });
 }

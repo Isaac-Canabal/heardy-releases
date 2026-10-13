@@ -201,6 +201,11 @@ enum DownloadSourceErrorKind {
   /// `reason: song_too_long`). Definitivo: reintentar no la hace más corta.
   songTooLong,
 
+  /// El servidor retiró este contenido por una reclamación de derechos de
+  /// autor (451, `reason: blocked_legal`). Definitivo: no se reintenta ni se
+  /// busca un reemplazo.
+  blockedLegal,
+
   /// El usuario canceló.
   cancelled,
 }
