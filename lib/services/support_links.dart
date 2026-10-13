@@ -1,1 +1,1 @@
-const supportDonationUrl = 'https://link.mercadopago.com.co/heardy';
+const supportDonationUrl = 'https://ko-fi.com/vainastech';
