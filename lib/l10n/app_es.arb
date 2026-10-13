@@ -102,12 +102,12 @@
   "serverIntroBody": "Heardy descarga a través del servidor oficial del proyecto. No hay nada que configurar aquí: si una descarga falla, prueba la conexión para saber si el problema es del servidor o de tu red.",
   "serverTestingButton": "Probando…",
   "serverTestButton": "Probar conexión",
-  "serverConnectedStatus": "Conectado — yt-dlp {version}",
+  "serverConnectedStatus": "Conectado — servidor {version}",
   "@serverConnectedStatus": {
     "placeholders": {"version": {"type": "String"}}
   },
 
-  "playlistUpdateFromYoutube": "Actualizar desde YouTube",
+  "playlistUpdateFromYoutube": "Actualizar desde el origen",
   "playlistNoNewSongs": "Ya está actualizada, no hay canciones nuevas",
   "playlistSongsQueuedSnack": "{count, plural, one{1 canción nueva encolada} other{{count} canciones nuevas encoladas}}",
   "@playlistSongsQueuedSnack": {
@@ -336,7 +336,7 @@
   "inboxAssignSheetTitle": "Asignar a…",
 
   "importScreenTitle": "Añadir música",
-  "importUrlHint": "Pega un enlace de YouTube o Spotify…",
+  "importUrlHint": "Pega un enlace…",
   "importPasteTooltip": "Pegar",
   "importAnalyzeError": "No se pudo analizar el enlace: {message}",
   "@importAnalyzeError": {
@@ -348,7 +348,7 @@
   "@importSongsQueuedSnack": {
     "placeholders": {"count": {"type": "int"}}
   },
-  "importSpotifySkippedSuffix": " · {skipped} sin buena coincidencia en YouTube",
+  "importSpotifySkippedSuffix": " · {skipped} sin buena coincidencia",
   "@importSpotifySkippedSuffix": {
     "placeholders": {"skipped": {"type": "int"}}
   },
@@ -376,7 +376,7 @@
   "@importSpotifyGoodMatchSummary": {
     "placeholders": {"acceptable": {"type": "int"}, "total": {"type": "int"}}
   },
-  "importSpotifyPartialMatchSummary": "{acceptable} de {total} se van a descargar — el resto no tiene una coincidencia confiable en YouTube",
+  "importSpotifyPartialMatchSummary": "{acceptable} de {total} se van a descargar — el resto no tiene una coincidencia confiable",
   "@importSpotifyPartialMatchSummary": {
     "placeholders": {"acceptable": {"type": "int"}, "total": {"type": "int"}}
   },
@@ -385,7 +385,7 @@
   "importCancelAllButton": "Cancelar todo",
   "importFailuresTitle": "No se pudieron descargar",
   "importDismissButton": "Descartar",
-  "importMatchNoResult": "No se encontró nada parecido en YouTube",
+  "importMatchNoResult": "No se encontró nada parecido",
   "importMatchGood": "Δ {diff}s",
   "@importMatchGood": {
     "placeholders": {"diff": {"type": "int"}}
@@ -564,7 +564,7 @@
   "dlNotFound": "Ese contenido no se puede descargar (borrado, privado, restringido, en directo o demasiado largo).",
   "dlUnsupportedMedia": "Ese vídeo no tiene una pista de audio compatible.",
   "dlDailyQuota": "Has llegado a tu cupo de descargas. Vuelve más tarde.",
-  "dlAntiBot": "YouTube bloqueó temporalmente al servidor. Puede tardar entre 20 y 40 minutos; se reintentará solo.",
+  "dlAntiBot": "El origen bloqueó temporalmente al servidor. Puede tardar entre 20 y 40 minutos; se reintentará solo.",
   "dlCapacity": "Los servidores han agotado su capacidad de este mes. Vuelve a intentarlo más adelante.",
   "dlSongTooLong": "Esta canción es demasiado larga para descargarla desde el servidor.",
   "dlBlockedLegal": "Este contenido no está disponible por una reclamación de derechos de autor.",
@@ -592,11 +592,11 @@
   "errorRateLimited": "Estás haciendo demasiadas acciones seguidas. Espera un momento e inténtalo de nuevo.",
   "errorAuthUnavailable": "No se pudo comprobar tu sesión ahora mismo. Se reintentará en unos segundos.",
   "errorServerNotReady": "El servidor todavía no está listo. Inténtalo de nuevo más tarde.",
-  "spotifyUrlInvalid": "Ese enlace de Spotify no es válido. Comprueba que lo copiaste completo.",
-  "spotifyDataMissing": "No se pudieron obtener los datos de Spotify. El enlace puede ser privado o no válido.",
-  "spotifyTypeUnsupported": "Ese tipo de enlace de Spotify no se puede descargar todavía.",
-  "spotifyAccess": "No se pudo acceder a Spotify. Comprueba que el enlace sea correcto y público.",
-  "spotifyFormat": "No se encontraron datos en la página de Spotify. Es posible que Spotify haya cambiado su formato.",
+  "spotifyUrlInvalid": "Ese enlace no es válido. Comprueba que lo copiaste completo.",
+  "spotifyDataMissing": "No se pudieron obtener los datos del enlace. El enlace puede ser privado o no válido.",
+  "spotifyTypeUnsupported": "Ese tipo de enlace no se puede descargar todavía.",
+  "spotifyAccess": "No se pudo acceder al enlace. Comprueba que el enlace sea correcto y público.",
+  "spotifyFormat": "No se encontraron datos en la página del enlace. Es posible que haya cambiado su formato.",
   "playlistDuplicateName": "Ya existe una playlist con ese nombre.",
   "probeNoServer": "No hay dirección de servidor configurada.",
   "probeKeyInvalid": "La clave de acceso no es válida. Inicia sesión de nuevo.",
@@ -669,7 +669,7 @@
   "restoreCloudEmpty": "La biblioteca en la nube está vacía todavía.",
   "restoreUpToDate": "Ya tienes las {count} canciones de tu cuenta en este equipo.",
   "@restoreUpToDate": {"placeholders": {"count": {"type": "int"}}},
-  "restoreMatching": "Buscando en YouTube {done} de {total}...",
+  "restoreMatching": "Buscando coincidencias {done} de {total}...",
   "@restoreMatching": {"placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}},
   "restoreDoneNone": "No se encontró ninguna coincidencia aceptable.",
   "restoreDoneQueued": "Se encolaron {count} canciones. Mira el progreso en Añadir.",
