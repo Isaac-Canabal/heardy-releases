@@ -1,7 +1,7 @@
 name: heardy
 description: An offline-first local music library player.
 publish_to: 'none'
-version: 1.1.10+10
+version: 1.2.0+11
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -56,6 +56,9 @@ dependencies:
   # único que lo usa.
   file_picker: ^8.1.4
   crypto: ^3.0.7
+  # Sincronización por Wi-Fi: X25519, Ed25519, ChaCha20-Poly1305 y HKDF en Dart
+  # puro, sin primitivas propias. 2.9.0 (2025-11-21) es la última estable.
+  cryptography: 2.9.0
   audio_metadata_reader: ^1.7.1
   flutter_foreground_task: ^11.0.1
   # Fase 2 del plan de seguridad: identidad por cuenta real (Firebase Auth)

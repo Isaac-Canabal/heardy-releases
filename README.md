@@ -55,6 +55,20 @@ ISCC.exe windows\installer\heardy.iss   # deja build\windows\installer\Heardy-Se
 
 **Servidor**: la app apunta por defecto al servidor oficial del proyecto. Para otro, compilar con `--dart-define=HEARDY_OFFICIAL_SERVER_URL=...`. Las funciones con cuenta usan el proyecto de Firebase del proyecto (`android/app/google-services.json`); si compilas tu propia variante, sustituye esa configuración por la tuya.
 
+## Créditos
+
+Heardy es publicado por **Vainastech**. Se apoya en software libre; gracias a sus autores:
+
+- [NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor) y [NewPipe](https://github.com/TeamNewPipe/NewPipe) (TeamNewPipe), GPL-3.0-or-later: resolución de enlaces en Android; algunos archivos del plugin `packages/heardy_yt_stream` derivan de NewPipe y conservan su aviso.
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp), Unlicense: resolución de enlaces en Windows (binario incluido y autoactualizable).
+- [FFmpeg](https://ffmpeg.org/) (compilación LGPL de BtbN), LGPL-2.1-or-later: onda del reproductor en Windows; viaja con su `LICENSE.txt`.
+- [media_kit](https://github.com/media-kit/media-kit) y libmpv: reproducción de audio en Windows.
+- [cryptography](https://pub.dev/packages/cryptography): cifrado de la sincronización por Wi-Fi.
+- OkHttp, RxJava y nanojson (Apache-2.0) en el plugin de Android; [LRCLIB](https://lrclib.net/) para las letras.
+- [Flutter](https://flutter.dev/) y los paquetes de Dart/Flutter listados en `pubspec.lock`, cada uno bajo su licencia (BSD-3-Clause, MIT, Apache-2.0...). Las licencias también se ven dentro de la app, en la página de licencias.
+
+El detalle y las modificaciones están en [`NOTICE.md`](NOTICE.md). Heardy no está afiliado ni respaldado por ninguno de estos proyectos.
+
 ## Licencia
 
 Heardy se distribuye bajo la **GNU General Public License v3.0**; ver [`LICENSE`](LICENSE). Incluye componentes de terceros con sus propias licencias; ver [`NOTICE.md`](NOTICE.md).

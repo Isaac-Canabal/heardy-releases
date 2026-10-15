@@ -4,6 +4,10 @@ import 'package:uuid/uuid.dart';
 
 import '../models/playlist.dart';
 import '../providers/music_provider.dart';
+import '../services/import_destination_logic.dart';
+import '../services/playlist_filter_logic.dart';
+import '../services/stream_resolver.dart';
+import 'playlist_kind_picker.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
 
@@ -14,21 +18,33 @@ import '../l10n/app_localizations.dart';
 class PlaylistChoice {
   final String? existingPlaylistId;
   final String? newPlaylistName;
+  final String newPlaylistKind;
   const PlaylistChoice.existing(this.existingPlaylistId)
-    : newPlaylistName = null;
-  const PlaylistChoice.newPlaylist(this.newPlaylistName)
-    : existingPlaylistId = null;
+    : newPlaylistName = null,
+      newPlaylistKind = Playlist.kindLocal;
+  const PlaylistChoice.newPlaylist(
+    this.newPlaylistName, {
+    this.newPlaylistKind = Playlist.kindLocal,
+  }) : existingPlaylistId = null;
 }
 
 /// Abre el selector y devuelve la elección del usuario (`null` si canceló).
 /// [excludePlaylistId] oculta esa playlist de la lista — para "mover"/"copiar"
 /// una canción, no tiene sentido ofrecer la playlist en la que ya está.
+/// [kind] (`Playlist.kindLocal`/`kindOnline`) limita la lista a ese tipo y
+/// fija el tipo de la playlist nueva; sin él se ofrecen todas y la nueva es
+/// local, salvo con [allowKindChoice], que deja elegir su tipo.
 Future<PlaylistChoice?> pickTargetPlaylist(
   BuildContext context, {
   String? suggestedName,
   String? excludePlaylistId,
+  String? kind,
+  bool allowKindChoice = false,
 }) {
-  var playlists = context.read<MusicProvider>().playlists;
+  // Sin streaming no se puede escuchar una playlist online: sólo se ofrecen
+  // destinos de descarga.
+  if (allowKindChoice && !streamingSupported) kind ??= Playlist.kindLocal;
+  var playlists = playlistsOfKind(context.read<MusicProvider>().playlists, kind);
   if (excludePlaylistId != null) {
     playlists = playlists.where((p) => p.id != excludePlaylistId).toList();
   }
@@ -39,8 +55,12 @@ Future<PlaylistChoice?> pickTargetPlaylist(
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (_) =>
-        PlaylistTargetSheet(playlists: playlists, suggestedName: suggestedName),
+    builder: (_) => PlaylistTargetSheet(
+      playlists: playlists,
+      suggestedName: suggestedName,
+      newPlaylistKind: kind ?? Playlist.kindLocal,
+      allowKindChoice: allowKindChoice && kind == null,
+    ),
   );
 }
 
@@ -55,8 +75,59 @@ Future<String?> resolveTargetPlaylistId(
   if (name == null || name.isEmpty) return null;
 
   final id = const Uuid().v4();
-  await context.read<MusicProvider>().createPlaylistWithId(id, name);
+  await context.read<MusicProvider>().createPlaylistWithId(id, name, kind: choice.newPlaylistKind);
   return id;
+}
+
+/// Destino ya resuelto (la playlist nueva ya existe) con lo que hace falta para
+/// decidir entre descargar y guardar referencias.
+class PlaylistDestination {
+  final String id;
+  final String name;
+  final String kind;
+  final bool isNew;
+  const PlaylistDestination({
+    required this.id,
+    required this.name,
+    required this.kind,
+    required this.isNew,
+  });
+
+  bool get isOnline => kind == Playlist.kindOnline;
+}
+
+/// Abre el selector (con elección de tipo por defecto) y resuelve el destino.
+/// `null` si el usuario canceló. [kind] fija el tipo si sólo vale uno.
+Future<PlaylistDestination?> pickPlaylistDestination(
+  BuildContext context, {
+  String? suggestedName,
+  String? kind,
+  bool allowKindChoice = true,
+}) async {
+  final choice = await pickTargetPlaylist(
+    context,
+    suggestedName: suggestedName,
+    kind: kind,
+    allowKindChoice: allowKindChoice,
+  );
+  if (choice == null || !context.mounted) return null;
+  final playlists = context.read<MusicProvider>().playlists;
+  final isNew = choice.existingPlaylistId == null;
+  final id = await resolveTargetPlaylistId(context, choice);
+  if (id == null || !context.mounted) return null;
+  final name = isNew
+      ? choice.newPlaylistName!
+      : playlists.where((p) => p.id == id).map((p) => p.name).firstOrNull ?? '';
+  return PlaylistDestination(
+    id: id,
+    name: name,
+    kind: destinationKind(
+      existingPlaylistId: choice.existingPlaylistId,
+      newPlaylistKind: choice.newPlaylistKind,
+      playlists: playlists,
+    ),
+    isNew: isNew,
+  );
 }
 
 /// Elegir UNA playlist destino, existente o nueva — a diferencia del selector
@@ -66,11 +137,15 @@ Future<String?> resolveTargetPlaylistId(
 class PlaylistTargetSheet extends StatefulWidget {
   final List<Playlist> playlists;
   final String? suggestedName;
+  final String newPlaylistKind;
+  final bool allowKindChoice;
 
   const PlaylistTargetSheet({
     super.key,
     required this.playlists,
     this.suggestedName,
+    this.newPlaylistKind = Playlist.kindLocal,
+    this.allowKindChoice = false,
   });
 
   @override
@@ -80,6 +155,8 @@ class PlaylistTargetSheet extends StatefulWidget {
 class _PlaylistTargetSheetState extends State<PlaylistTargetSheet> {
   String? _selectedId;
   late final TextEditingController _newNameController;
+  late String _newKind = widget.newPlaylistKind;
+  PlaylistKindFilter _filter = PlaylistKindFilter.all;
 
   @override
   void initState() {
@@ -95,9 +172,63 @@ class _PlaylistTargetSheetState extends State<PlaylistTargetSheet> {
     super.dispose();
   }
 
+  String get _effectiveNewKind =>
+      widget.allowKindChoice && !streamingSupported ? Playlist.kindLocal : _newKind;
+
+  void _setFilter(PlaylistKindFilter filter) {
+    setState(() {
+      _filter = filter;
+      if (filter == PlaylistKindFilter.downloaded) _newKind = Playlist.kindLocal;
+      if (filter == PlaylistKindFilter.notDownloaded && streamingSupported) _newKind = Playlist.kindOnline;
+      final selected = _selectedId;
+      if (selected != null && !filterPlaylistsByKind(widget.playlists, filter).any((p) => p.id == selected)) {
+        _selectedId = null;
+      }
+    });
+  }
+
+  Widget _buildFilterRow(AppLocalizations l10n) {
+    final labels = {
+      PlaylistKindFilter.all: l10n.homeFilterAll,
+      PlaylistKindFilter.downloaded: l10n.homeFilterDownloaded,
+      PlaylistKindFilter.notDownloaded: l10n.homeFilterNotDownloaded,
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final entry in labels.entries) ...[
+              ChoiceChip(
+                key: Key('target_filter_${entry.key.name}'),
+                label: Text(entry.value),
+                selected: _filter == entry.key,
+                showCheckmark: false,
+                selectedColor: AppTheme.primary,
+                backgroundColor: Colors.white.withValues(alpha: 0.06),
+                side: BorderSide.none,
+                labelStyle: TextStyle(
+                  color: Colors.white.withValues(alpha: _filter == entry.key ? 1 : 0.7),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
+                onSelected: (_) => _setFilter(entry.key),
+              ),
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
+    final visiblePlaylists = widget.allowKindChoice
+        ? filterPlaylistsByKind(widget.playlists, _filter)
+        : widget.playlists;
     final newName = _newNameController.text.trim();
     final canConfirm = _selectedId != null || newName.isNotEmpty;
 
@@ -116,7 +247,7 @@ class _PlaylistTargetSheetState extends State<PlaylistTargetSheet> {
         // ocupa lo que le sobra, ya scrolleable.
         child: ConstrainedBox(
           constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.75,
+            maxHeight: MediaQuery.of(context).size.height * 0.9,
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -132,11 +263,12 @@ class _PlaylistTargetSheetState extends State<PlaylistTargetSheet> {
                   ),
                 ),
               ),
-              if (widget.playlists.isNotEmpty)
+              if (widget.allowKindChoice) _buildFilterRow(l10n),
+              if (visiblePlaylists.isNotEmpty)
                 Flexible(
                   child: ListView(
                     shrinkWrap: true,
-                    children: widget.playlists.map((playlist) {
+                    children: visiblePlaylists.map((playlist) {
                       return RadioListTile<String>(
                         key: Key('playlist_radio_${playlist.id}'),
                         value: playlist.id,
@@ -170,6 +302,15 @@ class _PlaylistTargetSheetState extends State<PlaylistTargetSheet> {
                   ),
                 ),
               ),
+              if (widget.allowKindChoice && newName.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                  child: PlaylistKindPicker(
+                    value: _newKind,
+                    streamingAvailable: streamingSupported,
+                    onChanged: (k) => setState(() => _newKind = k),
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.all(20),
                 child: SizedBox(
@@ -189,7 +330,10 @@ class _PlaylistTargetSheetState extends State<PlaylistTargetSheet> {
                             context,
                             _selectedId != null
                                 ? PlaylistChoice.existing(_selectedId)
-                                : PlaylistChoice.newPlaylist(newName),
+                                : PlaylistChoice.newPlaylist(
+                                    newName,
+                                    newPlaylistKind: _effectiveNewKind,
+                                  ),
                           )
                         : null,
                     child: Text(l10n.commonConfirm),

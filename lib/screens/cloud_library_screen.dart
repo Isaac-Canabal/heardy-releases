@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/cloud_library_provider.dart';
 import '../providers/download_provider.dart';
+import '../providers/folder_sync_provider.dart';
 import '../services/friendly_error.dart';
 import '../theme/app_theme.dart';
 import '../widgets/max_width_center.dart';
@@ -23,14 +24,21 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<CloudLibraryProvider>().refresh();
+      if (!mounted) return;
+      context.read<CloudLibraryProvider>().refresh();
+      context.read<FolderSyncProvider>().refresh();
     });
   }
+
+  final Set<String> _queuedFolderHashes = {};
 
   Future<void> _downloadOne(CloudLibraryEntry entry) async {
     final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
     final result = await context.read<CloudLibraryProvider>().downloadOne(entry);
+    if (result == CloudDownloadResult.queued || result == CloudDownloadResult.alreadyQueued) {
+      setState(() => _queuedFolderHashes.add(entry.fileHash));
+    }
     final text = switch (result) {
       CloudDownloadResult.noMatch => l10n.cloudLibNoMatch,
       CloudDownloadResult.failed => l10n.cloudLibFailed,
@@ -89,73 +97,86 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
   }
 
   Widget _buildBody(AppLocalizations l10n, CloudLibraryProvider provider) {
+    final cloudEntries = provider.status == CloudLibraryStatus.ready ? provider.entries : <CloudLibraryEntry>[];
+    final cloudHashes = {for (final e in cloudEntries) e.fileHash};
+    final folderEntries = [
+      for (final song in context.watch<FolderSyncProvider>().otherDeviceSongs)
+        if (!cloudHashes.contains(song['fileHash']))
+          CloudLibraryEntry(song, queued: _queuedFolderHashes.contains(song['fileHash'])),
+    ];
+    final entries = [...cloudEntries, ...folderEntries];
     switch (provider.status) {
       case CloudLibraryStatus.idle:
       case CloudLibraryStatus.loading:
         return const Center(child: CircularProgressIndicator());
       case CloudLibraryStatus.noLibrary:
-        return _message(l10n.cloudLibNoLibrary);
+        return entries.isEmpty ? _message(l10n.cloudLibNoLibrary) : _list(l10n, provider, entries);
       case CloudLibraryStatus.error:
-        return _message(l10n.cloudLibError(localizedErrorReport(l10n, provider.error!)));
+        return entries.isEmpty
+            ? _message(l10n.cloudLibError(localizedErrorReport(l10n, provider.error!)))
+            : _list(l10n, provider, entries);
       case CloudLibraryStatus.ready:
-        final entries = provider.entries;
         if (entries.isEmpty) return _message(l10n.cloudLibEmpty);
-        final downloadable = provider.downloadableCount;
-        return Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 4),
-              child: Text(
-                l10n.cloudLibHint,
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: entries.length,
-                itemBuilder: (context, i) {
-                  final entry = entries[i];
-                  return ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: kScreenGutter),
-                    title: Text(
-                      entry.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                    subtitle: Text(
-                      entry.hasLink ? entry.artist : l10n.cloudLibNoLink(entry.artist),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
-                    ),
-                    trailing: entry.queued
-                        ? Text(l10n.cloudLibQueued, style: const TextStyle(color: Colors.white54, fontSize: 12))
-                        : IconButton(
-                            tooltip: l10n.cloudLibDownload,
-                            icon: const Icon(Icons.download_rounded, color: Colors.white70),
-                            onPressed: () => _downloadOne(entry),
-                          ),
-                  );
-                },
-              ),
-            ),
-            SafeArea(
-              top: false,
-              child: Padding(
-                padding: const EdgeInsets.all(kScreenGutter),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: FilledButton(
-                    onPressed: downloadable == 0 ? null : _downloadAll,
-                    child: Text(l10n.cloudLibDownloadAll(downloadable)),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
+        return _list(l10n, provider, entries);
     }
+  }
+
+  Widget _list(AppLocalizations l10n, CloudLibraryProvider provider, List<CloudLibraryEntry> entries) {
+    final downloadable = provider.downloadableCount;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 4),
+          child: Text(
+            l10n.cloudLibHint,
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+          ),
+        ),
+        Expanded(
+          child: ListView.builder(
+            itemCount: entries.length,
+            itemBuilder: (context, i) {
+              final entry = entries[i];
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: kScreenGutter),
+                title: Text(
+                  entry.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                subtitle: Text(
+                  entry.hasLink ? entry.artist : l10n.cloudLibNoLink(entry.artist),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+                trailing: entry.queued
+                    ? Text(l10n.cloudLibQueued, style: const TextStyle(color: Colors.white54, fontSize: 12))
+                    : IconButton(
+                        tooltip: l10n.cloudLibDownload,
+                        icon: const Icon(Icons.download_rounded, color: Colors.white70),
+                        onPressed: () => _downloadOne(entry),
+                      ),
+              );
+            },
+          ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.all(kScreenGutter),
+            child: SizedBox(
+              width: double.infinity,
+              child: FilledButton(
+                onPressed: downloadable == 0 ? null : _downloadAll,
+                child: Text(l10n.cloudLibDownloadAll(downloadable)),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _message(String text) {

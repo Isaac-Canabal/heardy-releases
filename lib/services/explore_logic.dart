@@ -291,6 +291,49 @@ ExploreArtistHit? pickArtistHit(List<ExploreArtistHit> hits) {
   return null;
 }
 
+final _creditSeparator = RegExp(r'\s*,\s*|\s+&\s+|\s+(?:feat|ft)\.?\s+|\s+x\s+', caseSensitive: false);
+
+/// Artistas acreditados en un campo "artista" (`A, B`, `A & B`, `A feat. B`,
+/// `A x B`), sin vacíos ni repetidos.
+List<String> splitArtistCredits(String credits) {
+  final out = <String>[];
+  final seen = <String>{};
+  for (final part in credits.split(_creditSeparator)) {
+    final name = part.trim();
+    if (name.isEmpty || !seen.add(normalizeArtistName(name))) continue;
+    out.add(name);
+  }
+  return out;
+}
+
+const _diacritics = {
+  'á': 'a', 'à': 'a', 'ä': 'a', 'â': 'a', 'ã': 'a', 'é': 'e', 'è': 'e', 'ë': 'e', 'ê': 'e',
+  'í': 'i', 'ì': 'i', 'ï': 'i', 'î': 'i', 'ó': 'o', 'ò': 'o', 'ö': 'o', 'ô': 'o', 'õ': 'o',
+  'ú': 'u', 'ù': 'u', 'ü': 'u', 'û': 'u', 'ñ': 'n', 'ç': 'c',
+};
+
+/// Minúsculas, sin tildes y con espacios colapsados: lo único que se ignora al
+/// comparar nombres de artista.
+String normalizeArtistName(String name) {
+  final lower = name.toLowerCase();
+  final sb = StringBuffer();
+  for (final r in lower.runes) {
+    final ch = String.fromCharCode(r);
+    sb.write(_diacritics[ch] ?? ch);
+  }
+  return sb.toString().trim().replaceAll(RegExp(r'\s+'), ' ');
+}
+
+/// Coincidencia exacta (normalizada) con [name]; si no hay, el primer
+/// resultado con canal. Sin similitud difusa.
+ExploreArtistHit? pickArtistHitForName(String name, List<ExploreArtistHit> hits) {
+  final target = normalizeArtistName(name);
+  for (final h in hits) {
+    if (h.channelId.isNotEmpty && normalizeArtistName(h.name) == target) return h;
+  }
+  return pickArtistHit(hits);
+}
+
 /// Filtro de la búsqueda de Internet: canciones (yt-dlp `/search`) o uno de
 /// los tipos de `/explore/search`.
 enum SearchKind { songs, playlists, albums, artists }

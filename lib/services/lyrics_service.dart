@@ -33,6 +33,18 @@ const _userAgent = 'Heardy/1.0.0 (https://github.com/Isaac-Canabal/Heardy)';
 /// repartido entre más fuentes.
 const _networkTimeout = Duration(seconds: 4);
 
+/// Saca la lista de canciones de una respuesta de búsqueda de NetEase.
+/// El endpoint `/search/get/web` pasó a devolver `result` como una cadena
+/// cifrada en lugar de un objeto; eso (y cualquier otra forma inesperada) se
+/// trata como "sin resultados" y no como un fallo de la fuente.
+List<dynamic> neteaseSongsFrom(Object? decoded) {
+  if (decoded is! Map) return const [];
+  final result = decoded['result'];
+  if (result is! Map) return const [];
+  final songs = result['songs'];
+  return songs is List ? songs : const [];
+}
+
 /// Elige, de los resultados de búsqueda de NetEase Cloud Music, el más
 /// cercano en duración a [targetDurationSeconds] — misma regla que
 /// `spotify_match.dart` (ver CLAUDE.md, "Spotify bridge"): comparar por
@@ -200,7 +212,7 @@ class LyricsService {
   /// ([pickNeteaseCandidate]): duración, nunca texto.
   Future<_LyricsResult?> _fromNetease(String title, String artist, int durationSeconds) async {
     final headers = {'User-Agent': _userAgent, 'Referer': 'https://music.163.com/'};
-    final searchUri = Uri.parse('https://music.163.com/api/search/get/web').replace(queryParameters: {
+    final searchUri = Uri.parse('https://music.163.com/api/search/get').replace(queryParameters: {
       's': '$title $artist'.trim(),
       'type': '1',
       'offset': '0',
@@ -208,8 +220,7 @@ class LyricsService {
     });
     final searchResponse = await http.get(searchUri, headers: headers).timeout(_networkTimeout);
     if (searchResponse.statusCode != 200) return null;
-    final searchData = jsonDecode(searchResponse.body) as Map<String, dynamic>;
-    final songs = (searchData['result'] as Map<String, dynamic>?)?['songs'] as List<dynamic>? ?? const [];
+    final songs = neteaseSongsFrom(jsonDecode(searchResponse.body));
     final match = pickNeteaseCandidate(songs, durationSeconds);
     if (match == null) return null;
 

@@ -46,7 +46,7 @@ class AppNotification {
         type: AppNotificationType.appUpdate,
         id: 'update:${info.tag}',
         title: info.name.isEmpty ? info.tag : info.name,
-        body: info.body,
+        body: releaseNotesToPlainText(info.body),
         updateInfo: info,
       );
 }

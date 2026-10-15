@@ -3,6 +3,12 @@
     package="com.heardy.app">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Sincronizacion por Wi-Fi: solo lectura del estado de la red y el
+         MulticastLock del descubrimiento. No hace falta ubicacion ni
+         "dispositivos cercanos": se usan sockets TCP/UDP normales. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- flutter_foreground_task: mantiene la cola de descargas viva (y con

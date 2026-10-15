@@ -10,11 +10,12 @@ import '../providers/music_provider.dart';
 import '../services/audio_player_handler.dart';
 import '../services/download_source.dart';
 import '../services/friendly_error.dart';
+import '../services/import_destination_logic.dart';
 import '../services/stream_resolver.dart';
 import 'desktop_shell_scope.dart';
 import 'playlist_target_sheet.dart';
 
-/// Acciones "Descargar" y "Escuchar" de una pista remota para cualquier
+/// Acciones "Añadir a playlist" (descargar o guardar referencia) y "Escuchar" de una pista remota para cualquier
 /// pantalla con [State]. El host llama a [initRemoteTrackActions] en
 /// `initState` y a [disposeRemoteTrackActions] en `dispose`.
 mixin RemoteTrackActionsMixin<T extends StatefulWidget> on State<T> {
@@ -167,24 +168,29 @@ mixin RemoteTrackActionsMixin<T extends StatefulWidget> on State<T> {
   }
 }
 
-/// Elige playlist y encola la descarga de [track]; compartido por las pantallas
-/// con el mixin y por Reproduciendo. [isMounted] protege los `await`.
+/// Punto único de "añadir" para Explorar, búsqueda, artista, colecciones y
+/// Reproduciendo: el usuario elige destino de cualquier tipo; una playlist local
+/// encola la descarga como siempre y una online sólo guarda la referencia
+/// (nunca toca `DownloadProvider`). [isMounted] protege los `await`.
 Future<void> enqueueRemoteTrackDownload(
   BuildContext context,
   RemoteTrack track, {
   required bool Function() isMounted,
 }) async {
-  final choice = await pickTargetPlaylist(context);
-  if (choice == null || !isMounted()) return;
-  // ignore: use_build_context_synchronously
-  final playlistId = await resolveTargetPlaylistId(context, choice);
-  if (playlistId == null || !isMounted()) return;
+  final destination = await pickPlaylistDestination(context);
+  if (destination == null || !isMounted()) return;
+
+  if (destinationActionForKind(destination.kind) == DestinationAction.saveReferences) {
+    // ignore: use_build_context_synchronously
+    await saveRemoteTracksToOnlinePlaylist(context, destination, [track]);
+    return;
+  }
 
   // ignore: use_build_context_synchronously
   final provider = context.read<DownloadProvider>();
   final added = await provider.enqueueTrack(
     track,
-    playlistId: playlistId,
+    playlistId: destination.id,
     // Viene de /search o de Explorar (listados aplanados): `artist` puede ser
     // el canal, no el artista real. metadataComplete=false hace que el worker
     // pida /resolve antes de bajar nada (DD6).
@@ -203,4 +209,54 @@ Future<void> enqueueRemoteTrackDownload(
       duration: const Duration(seconds: 3),
     ),
   );
+}
+
+/// Guarda [tracks] como referencias en la playlist online [destination] y avisa
+/// con un snack que permite abrirla. Devuelve cuántas eran nuevas (-1 si falló).
+Future<int> saveRemoteTracksToOnlinePlaylist(
+  BuildContext context,
+  PlaylistDestination destination,
+  List<RemoteTrack> tracks, {
+  String suffix = '',
+}) async {
+  final music = context.read<MusicProvider>();
+  final l10n = AppLocalizations.of(context)!;
+  final messenger = ScaffoldMessenger.of(context);
+  final shell = DesktopShellScope.maybeOf(context);
+  final navigator = Navigator.of(context);
+  final records = recordsFromTracks(tracks);
+
+  int added;
+  try {
+    added = await music.saveRemoteTracksToPlaylist(destination.id, records);
+  } catch (_) {
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(l10n.onlineSaveFailedSnack),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+    return -1;
+  }
+
+  final text = added == 0
+      ? l10n.onlineAlreadySavedSnack(records.length, destination.name)
+      : records.length == 1
+          ? l10n.onlineSavedTrackSnack(destination.name)
+          : l10n.onlineSavedCountSnack(added, destination.name);
+  messenger.showSnackBar(
+    SnackBar(
+      content: Text(text + suffix),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(seconds: 4),
+      action: SnackBarAction(
+        label: l10n.onlineOpenPlaylistAction,
+        onPressed: () => shell != null
+            ? shell.openPlaylist(destination.id)
+            : navigator.pushNamed('/playlist', arguments: destination.id),
+      ),
+    ),
+  );
+  return added;
 }

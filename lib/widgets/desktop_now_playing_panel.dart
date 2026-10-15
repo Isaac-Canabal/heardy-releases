@@ -6,6 +6,7 @@ import '../l10n/app_localizations.dart';
 import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_tray_service.dart';
+import '../services/open_artist_profile.dart';
 import '../services/stream_queue_logic.dart';
 import 'add_current_track.dart';
 import 'playback_options_sheet.dart';
@@ -22,6 +23,10 @@ import 'desktop_playback_bar.dart' show DesktopVolumeControl;
 class DesktopNowPlayingPanel extends StatefulWidget {
   final VoidCallback onClose;
   final ValueChanged<String> onOpenPlaylist;
+
+  /// Empuja una ruta en el navegador de contenido del shell (no en el raíz),
+  /// contrayendo antes la letra expandida que lo tapa.
+  final ValueChanged<Route<void>> onPushContentRoute;
 
   /// `true` cuando la letra está expandida: el panel deja de recibir un
   /// ancho fijo del shell (pasa a ocupar todo lo que sobra a la derecha de
@@ -44,6 +49,7 @@ class DesktopNowPlayingPanel extends StatefulWidget {
     super.key,
     required this.onClose,
     required this.onOpenPlaylist,
+    required this.onPushContentRoute,
     this.lyricsExpanded = false,
     required this.onToggleLyricsExpanded,
     this.cinemaMode = false,
@@ -58,6 +64,28 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
   String? _currentId;
   Color _dominantColor = kNowPlayingFallbackColor;
   int _tab = 0;
+  bool _openingArtist = false;
+
+  Future<void> _openArtist(String credits) {
+    if (_openingArtist) return Future.value();
+    return openArtistProfile(
+      context,
+      credits,
+      isMounted: () => mounted,
+      setBusy: (busy) => setState(() => _openingArtist = busy),
+      pushRoute: widget.onPushContentRoute,
+    );
+  }
+
+  Widget _artistLink(MediaItem item, double fontSize) {
+    final artist = item.artist ?? '';
+    return ArtistLink(
+      label: artist.isEmpty ? AppLocalizations.of(context)!.commonUnknownArtist : artist,
+      busy: _openingArtist,
+      fontSize: fontSize,
+      onTap: artist.trim().isEmpty ? null : () => _openArtist(artist),
+    );
+  }
 
   String _artPathOf(MediaItem item) => item.extras?['artPath'] as String? ?? '';
 
@@ -159,16 +187,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Text(
-                                item.artist ?? l10n.commonUnknownArtist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.grey[400],
-                                  fontSize: 14,
-                                ),
-                              ),
+                              _artistLink(item, 14),
                             ],
                           ),
                         ),
@@ -298,17 +317,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          item.artist ??
-                              AppLocalizations.of(context)!.commonUnknownArtist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontSize: 13,
-                          ),
-                        ),
+                        _artistLink(item, 13),
                         const SizedBox(height: 12),
                         _Controls(audioHandler: audioHandler),
                         const SizedBox(height: 12),

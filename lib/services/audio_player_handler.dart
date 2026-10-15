@@ -16,8 +16,7 @@ import 'playback_state_service.dart';
 import 'app_log.dart';
 import 'download_source.dart';
 import 'fade_logic.dart';
-import 'metadata_service.dart';
-import 'replay_gain_logic.dart';
+import 'online_playlist_logic.dart' show shouldRecordRemotePlay;
 import 'playback_speed_logic.dart';
 import 'repeat_count_logic.dart';
 import 'shuffle_logic.dart';
@@ -75,27 +74,7 @@ double clampVolume(double value) {
 }
 
 class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
-  // Efectos de Android (ecualizador, estabilizador de volumen): tienen que
-  // pasarse en el momento de construir el AudioPlayer, no se pueden agregar
-  // después — ver audio_effects_service.dart, que es quien realmente los
-  // controla. **Sólo se agregan al pipeline si `Platform.isAndroid`**: a
-  // pesar de que `just_audio` sí filtra `androidAudioEffects` por
-  // plataforma en su propio `InitRequest`, el propio `AudioPlayer` activa
-  // *todos* los efectos del `AudioPipeline` sin ese filtro (`for (var
-  // audioEffect in _audioPipeline._audioEffects) await audioEffect
-  // ._activate(platform)`, en `just_audio.dart`), y `AndroidEqualizer
-  // ._activate()` llama a un método (`androidEqualizerGetParameters`) que
-  // sólo la implementación real de Android tiene — en cualquier otra
-  // (`just_audio_media_kit` en Windows incluido) lanza `UnimplementedError`
-  // sin capturar, dejando el reproductor entero sin arrancar. Reproducido
-  // en vivo: sin este guard, Heardy no suena nada en Windows.
-  final AndroidEqualizer _androidEqualizer = AndroidEqualizer();
-  final AndroidLoudnessEnhancer _androidLoudnessEnhancer = AndroidLoudnessEnhancer();
-  late final AudioPlayer _player = AudioPlayer(
-    audioPipeline: Platform.isAndroid
-        ? AudioPipeline(androidAudioEffects: [_androidLoudnessEnhancer, _androidEqualizer])
-        : AudioPipeline(),
-  );
+  late final AudioPlayer _player = AudioPlayer();
   final SafUtil _safUtil = SafUtil();
 
   // Store the last emitted PlaybackEvent so we can rebuild state on shuffle/loop changes
@@ -114,8 +93,6 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   int? _playNextInsertIndex;
 
   AudioPlayer get player => _player;
-  AndroidEqualizer get androidEqualizer => _androidEqualizer;
-  AndroidLoudnessEnhancer get androidLoudnessEnhancer => _androidLoudnessEnhancer;
 
   // --- VOLUMEN ---
   // El volumen elegido por el usuario (escritorio: el slider de la barra de
@@ -131,15 +108,13 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     PlaybackStateService.saveVolume(v);
   }
 
-  // Volumen real del motor = elegido por el usuario x normalización de la
-  // pista x fundido de borde de pista.
-  bool _normalizeVolume = false;
+  // Volumen real del motor = elegido por el usuario x fundido de borde de
+  // pista.
   bool _trackFade = false;
-  double _normFactor = 1.0;
   double _fadeFactor = 1.0;
   Timer? _fadeTimer;
 
-  double get _outputFactor => _normFactor * _fadeFactor;
+  double get _outputFactor => _fadeFactor;
 
   Future<void> _pushVolume() async {
     if (_sleepFading) return;
@@ -153,7 +128,6 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   Future<void> _loadAudioPrefs() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await setNormalizeVolume(prefs.getBool(SettingsProvider.normalizeVolumeKey) ?? false);
       await setSkipSilence(prefs.getBool(SettingsProvider.skipSilenceKey) ?? false);
       setTrackFade(prefs.getBool(SettingsProvider.trackFadeKey) ?? false);
     } catch (e) {
@@ -161,27 +135,8 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
-  /// Normalización por ReplayGain: sólo atenúa (factor <= 1.0). Cubre únicamente
-  /// canciones importadas con la etiqueta (MP3/FLAC/OGG/Opus); el M4A de las
-  /// descargas no la trae, y las canciones sin ella suenan sin cambios.
-  Future<void> setNormalizeVolume(bool enabled) async {
-    _normalizeVolume = enabled;
-    await _updateNormalization(mediaItem.value);
-  }
-
-  Future<void> _updateNormalization(MediaItem? item) async {
-    var factor = 1.0;
-    if (_normalizeVolume && item != null && _streamTracks == null) {
-      final db = await MetadataService.storedReplayGainDb(item.id);
-      if (db != null) factor = replayGainFactor(db);
-    }
-    if (mediaItem.value?.id != item?.id) return;
-    _normFactor = factor;
-    await _pushVolume();
-  }
-
-  /// Sólo Android (ExoPlayer). En Windows el `af` de mpv ya lo usa el
-  /// ecualizador y un segundo filtro lo pisaría, así que no se ofrece.
+  /// Sólo Android (ExoPlayer): el libmpv de escritorio no trae filtros de
+  /// libavfilter con los que implementarlo.
   bool get supportsSkipSilence => Platform.isAndroid;
 
   Future<void> setSkipSilence(bool enabled) async {
@@ -534,7 +489,56 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   Future<StreamInfo>? _prefetch;
   bool get isStreamQueueActive => _streamTracks != null;
 
+  // Escuchas por streaming de pistas guardadas en una playlist online: sólo
+  // esas cuentan en estadísticas (`remote_play_history`); un "Escuchar"
+  // suelto deja únicamente `stream_history`.
+  Set<String> _savedStreamIds = const {};
+  String? _remoteTrackingId;
+  Duration _remoteMaxPosition = Duration.zero;
+  Duration _remoteDuration = Duration.zero;
+  bool _remoteRecorded = false;
+
+  void _startRemoteTracking(String videoId, Duration duration) {
+    _finalizeRemotePlay();
+    if (!_savedStreamIds.contains(videoId)) return;
+    _remoteTrackingId = videoId;
+    _remoteDuration = duration;
+    _remoteMaxPosition = Duration.zero;
+    _remoteRecorded = false;
+  }
+
+  /// Síncrona: decide al instante y escribe sin bloquear. Idempotente por
+  /// pista gracias a [_remoteRecorded].
+  void _finalizeRemotePlay() {
+    final id = _remoteTrackingId;
+    if (id == null || _remoteRecorded) return;
+    if (!shouldRecordRemotePlay(
+      videoId: id,
+      savedIds: _savedStreamIds,
+      listened: _remoteMaxPosition,
+      duration: _remoteDuration,
+    )) {
+      return;
+    }
+    _remoteRecorded = true;
+    final now = DateTime.now();
+    DatabaseHelper.instance
+        .insertRemotePlay(id, now.toIso8601String(), now.toUtc().toIso8601String(), _remoteMaxPosition.inSeconds)
+        .catchError((Object e) {
+      appLog('Reproducción remota no guardada (${e.runtimeType})');
+      return false;
+    });
+  }
+
+  void _clearRemoteTracking() {
+    _finalizeRemotePlay();
+    _remoteTrackingId = null;
+    _remoteMaxPosition = Duration.zero;
+    _remoteRecorded = false;
+  }
+
   void _cancelStreamQueue() {
+    _clearRemoteTracking();
     _streamGen.invalidate();
     _streamDebouncer.cancel();
     if (_streamTracks != null) {
@@ -558,14 +562,16 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   Future<void> playStreamQueue(
     List<RemoteTrack> tracks,
     String startId,
-    StreamResolver resolver,
-  ) async {
+    StreamResolver resolver, {
+    Set<String> savedVideoIds = const {},
+  }) async {
     final seed = buildStreamQueue(tracks, startId);
     if (seed.tracks.isEmpty) return;
 
     await _finalizePlay();
     _resetTracking();
     _cancelStreamQueue();
+    _savedStreamIds = savedVideoIds;
     _streamReady = false;
     _streamErrorReportedFor = null;
     _repeatCounter.cancel();
@@ -587,6 +593,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   /// rápidos. Cualquier carga en vuelo de un destino anterior queda descartada.
   void _selectStreamTarget(int index) {
     if (_streamTracks == null) return;
+    _finalizeRemotePlay();
     _streamGen.invalidate();
     _streamReady = false;
     _streamIndex = index;
@@ -647,6 +654,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         mediaItem.add(item);
         playbackState.add(_buildPlaybackState(_lastEvent));
         _recordStreamHistory(track, info.durationSeconds);
+        _startRemoteTracking(
+          track.id,
+          Duration(seconds: info.durationSeconds > 0 ? info.durationSeconds : track.durationSeconds),
+        );
         _streamReady = true;
         // play() de just_audio no vuelve hasta que la pista termina o se pausa.
         _player.play().catchError((Object _) {});
@@ -716,6 +727,8 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     // Un `completed` de la fuente vieja durante una carga no debe avanzar la cola.
     if (tracks == null || !_streamReady) return;
     _streamReady = false;
+    if (_remoteTrackingId != null) _remoteMaxPosition = _remoteDuration;
+    _finalizeRemotePlay();
     final next = nextStreamIndex(_streamIndex, tracks.length);
     if (next == null) {
       await _endStreamQueue();
@@ -790,17 +803,12 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       if (_streamTracks != null) {
         // Fuente única: el índice del player no es el de la cola publicada.
         _playNextInsertIndex = null;
-        if (_normFactor != 1.0) {
-          _normFactor = 1.0;
-          _pushVolume();
-        }
         return;
       }
       final playlistQueue = queue.value;
       if (index != null && playlistQueue.isNotEmpty && index < playlistQueue.length) {
         mediaItem.add(playlistQueue[index]);
         _startTracking(playlistQueue[index]);
-        _updateNormalization(playlistQueue[index]);
       } else {
         _resetTracking();
       }
@@ -884,6 +892,12 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   void _onTrackingPosition(Duration position) {
     if (_streamTracks != null && _streamFailures > 0 && shouldResetStreamFailures(position)) {
       _streamFailures = 0;
+    }
+    if (_remoteTrackingId != null &&
+        _streamReady &&
+        position > _remoteMaxPosition &&
+        mediaItem.value?.extras?['videoId'] == _remoteTrackingId) {
+      _remoteMaxPosition = position;
     }
     if (_trackingSongId == null) return;
     if (mediaItem.value?.id != _trackingSongId) return;
@@ -972,6 +986,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       await _abortSleepFadeAndCleanup();
     }
     await _player.pause();
+    _finalizeRemotePlay();
     // Si ya se llegó al umbral pero la canción nunca termina (el usuario
     // pausa y sale de la app, y el SO mata el proceso más tarde) la escucha
     // no debe perderse — registrarla ya en cuanto se pausa es idempotente

@@ -156,6 +156,20 @@ class _MainShellScreenState extends State<MainShellScreen>
     nav.pushNamed('/playlist', arguments: playlistId);
   }
 
+  void _pushContentRoute(Route<void> route) {
+    final nav = _contentNav.currentState;
+    if (nav == null) return;
+    // Con la letra expandida (o en modo cine) el panel tapa el navegador de
+    // contenido: hay que contraerla para que la ruta sea visible.
+    if (_lyricsExpanded || _cinemaMode) {
+      setState(() {
+        _lyricsExpanded = false;
+        _cinemaMode = false;
+      });
+    }
+    nav.push(route);
+  }
+
   void _setPanel(bool open) {
     if (_panelOpen == open) return;
     setState(() {
@@ -276,6 +290,7 @@ class _MainShellScreenState extends State<MainShellScreen>
                   child: DesktopNowPlayingPanel(
                     onClose: () => _setPanel(false),
                     onOpenPlaylist: _openPlaylist,
+                    onPushContentRoute: _pushContentRoute,
                     lyricsExpanded: true,
                     onToggleLyricsExpanded: () => _setLyricsExpanded(false),
                     cinemaMode: _cinemaMode,
@@ -301,6 +316,7 @@ class _MainShellScreenState extends State<MainShellScreen>
                     child: DesktopNowPlayingPanel(
                       onClose: () => _setPanel(false),
                       onOpenPlaylist: _openPlaylist,
+                      onPushContentRoute: _pushContentRoute,
                       onToggleLyricsExpanded: () => _setLyricsExpanded(true),
                     ),
                   ),

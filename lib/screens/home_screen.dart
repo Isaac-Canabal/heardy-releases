@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/settings_provider.dart';
@@ -7,14 +6,20 @@ import '../providers/notifications_provider.dart';
 import '../models/playlist.dart';
 import '../services/database_helper.dart';
 import '../services/audio_player_handler.dart';
+import '../services/friendly_error.dart';
+import '../services/playlist_filter_logic.dart';
+import '../services/stream_resolver.dart';
 import '../theme/app_theme.dart';
 import '../widgets/desktop_shell_scope.dart';
 import '../widgets/username_claim_sheet.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
+import '../widgets/playlist_cover.dart';
+import '../widgets/playlist_kind_picker.dart';
 import 'friends_screen.dart';
 import 'history_screen.dart';
 import 'notifications_screen.dart';
+import 'online_playlist_detail_screen.dart';
 import 'smart_lists_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -27,6 +32,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
+  PlaylistKindFilter _kindFilter = PlaylistKindFilter.all;
 
   @override
   void dispose() {
@@ -39,9 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
     Provider.of<SettingsProvider>(context);
     final l10n = AppLocalizations.of(context)!;
     final musicProvider = Provider.of<MusicProvider>(context);
-    final playlists = musicProvider.playlists
-        .where((p) => p.name.toLowerCase().contains(_query))
-        .toList();
+    final playlists = filterHomePlaylists(musicProvider.playlists, _kindFilter, _query);
 
     return SafeArea(
       child: Column(
@@ -100,7 +104,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(kScreenGutter, 18, kScreenGutter, 8),
+            padding: const EdgeInsets.fromLTRB(kScreenGutter, 18, kScreenGutter, 4),
             child: TextField(
               controller: _searchController,
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
@@ -115,9 +119,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
+          _buildFilterRow(l10n),
           Expanded(
             child: playlists.isEmpty
-                ? _buildEmptyState()
+                ? (musicProvider.playlists.isEmpty ? _buildEmptyState() : _buildNoMatchesState())
+
                 : ListView.builder(
                     padding: const EdgeInsets.fromLTRB(kScreenGutter, 8, kScreenGutter, 90),
                     itemCount: playlists.length,
@@ -127,6 +133,82 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFilterRow(AppLocalizations l10n) {
+    final labels = {
+      PlaylistKindFilter.all: l10n.homeFilterAll,
+      PlaylistKindFilter.downloaded: l10n.homeFilterDownloaded,
+      PlaylistKindFilter.notDownloaded: l10n.homeFilterNotDownloaded,
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(kScreenGutter, 4, kScreenGutter, 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final entry in labels.entries) ...[
+                    ChoiceChip(
+                      key: Key('home_filter_${entry.key.name}'),
+                      label: Text(entry.value),
+                      selected: _kindFilter == entry.key,
+                      showCheckmark: false,
+                      selectedColor: AppTheme.primary,
+                      backgroundColor: Colors.white.withValues(alpha: 0.06),
+                      side: BorderSide.none,
+                      labelStyle: TextStyle(
+                        color: Colors.white.withValues(alpha: _kindFilter == entry.key ? 1 : 0.7),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                      onSelected: (_) => setState(() => _kindFilter = entry.key),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          IconButton(
+            key: const Key('home_new_playlist'),
+            tooltip: l10n.homeNewPlaylistTitle,
+            icon: Icon(Icons.add_rounded, color: AppTheme.primaryLight),
+            onPressed: _createPlaylist,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createPlaylist() async {
+    final provider = context.read<MusicProvider>();
+    final result = await showCreatePlaylistDialog(context, streamingAvailable: streamingSupported);
+    if (result == null || !mounted) return;
+    try {
+      await provider.createPlaylist(result.name, kind: result.kind);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(localizedErrorReport(AppLocalizations.of(context)!, e))),
+      );
+    }
+  }
+
+  Widget _buildNoMatchesState() {
+    final l10n = AppLocalizations.of(context)!;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Text(
+          l10n.homeFilterNoMatches,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 14),
+        ),
       ),
     );
   }
@@ -212,7 +294,7 @@ class _PlaylistCard extends StatelessWidget {
     final musicProvider = Provider.of<MusicProvider>(context, listen: false);
 
     return FutureBuilder<
-        ({int songCount, int totalSeconds, String? coverArtPath})>(
+        ({int songCount, int totalSeconds, String? coverArtPath, String? thumbnailUrl})>(
       future: DatabaseHelper.instance.getPlaylistSummary(playlist.id),
       builder: (context, snapshot) {
         final summary = snapshot.data;
@@ -236,7 +318,7 @@ class _PlaylistCard extends StatelessWidget {
                 padding: const EdgeInsets.all(12),
                 child: Row(
                   children: [
-                    _CoverThumb(path: cover),
+                    PlaylistCover(path: cover, url: summary?.thumbnailUrl),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
@@ -253,12 +335,24 @@ class _PlaylistCard extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            l10n.homeSongsCount(count, AppTheme.formatDuration(duration)),
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.45),
-                              fontSize: 12,
-                            ),
+                          Row(
+                            children: [
+                              if (playlist.isOnline) ...[
+                                _OnlineBadge(label: l10n.onlinePlaylistBadge),
+                                const SizedBox(width: 6),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  l10n.homeSongsCount(count, AppTheme.formatDuration(duration)),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.45),
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
@@ -272,6 +366,10 @@ class _PlaylistCard extends StatelessWidget {
                           child: InkWell(
                             customBorder: const CircleBorder(),
                             onTap: () {
+                              if (playlist.isOnline) {
+                                playOnlinePlaylistWithFeedback(context, playlist.id);
+                                return;
+                              }
                               DesktopShellScope.maybeOf(context)?.openNowPlaying();
                               musicProvider.playPlaylistFromStart(
                                 playlist.id,
@@ -305,7 +403,9 @@ class _PlaylistCard extends StatelessWidget {
                               backgroundColor: AppTheme.surface,
                               title: Text(l10n.homeDeleteListTitle, style: const TextStyle(color: Colors.white)),
                               content: Text(
-                                l10n.homeDeleteListBody(playlist.name),
+                                playlist.isOnline
+                                    ? l10n.onlinePlaylistDeleteBody(playlist.name)
+                                    : l10n.homeDeleteListBody(playlist.name),
                                 style: const TextStyle(color: Colors.white70),
                               ),
                               actions: [
@@ -390,32 +490,34 @@ class _PlaylistCard extends StatelessWidget {
   }
 }
 
-class _CoverThumb extends StatelessWidget {
-  final String? path;
+class _OnlineBadge extends StatelessWidget {
+  final String label;
 
-  const _CoverThumb({this.path});
+  const _OnlineBadge({required this.label});
 
   @override
   Widget build(BuildContext context) {
-    if (path != null && File(path!).existsSync()) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Image.file(
-          File(path!),
-          width: 58,
-          height: 58,
-          fit: BoxFit.cover,
-        ),
-      );
-    }
     return Container(
-      width: 58,
-      height: 58,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
-        borderRadius: BorderRadius.circular(12),
+        color: AppTheme.primary.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(6),
       ),
-      child: const Icon(Icons.queue_music_rounded, color: Colors.white70),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.cloud_queue_rounded, size: 12, color: AppTheme.primaryLight),
+          const SizedBox(width: 3),
+          Text(
+            label,
+            style: TextStyle(
+              color: AppTheme.primaryLight,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

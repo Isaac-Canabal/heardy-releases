@@ -1,13 +1,16 @@
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import 'package:audio_service/audio_service.dart';
+import '../models/remote_track_record.dart';
 import '../models/playlist.dart';
 import '../models/song.dart';
 import '../services/database_helper.dart';
 import '../services/audio_player_handler.dart';
 import '../services/playback_state_service.dart';
 import '../services/friendly_error.dart';
+import '../services/online_playlist_logic.dart';
 import '../services/storage_service.dart';
+import '../services/stream_resolver.dart';
 
 class MusicProvider with ChangeNotifier {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
@@ -277,7 +280,7 @@ class MusicProvider with ChangeNotifier {
   }
 
   /// Inserts a new playlist into SQFlite and updates the UI state.
-  Future<void> createPlaylist(String name) async {
+  Future<void> createPlaylist(String name, {String kind = Playlist.kindLocal}) async {
     try {
       // Check for duplicate names (case-insensitive)
       final existing = _playlists.where((p) => p.name.toLowerCase() == name.toLowerCase()).toList();
@@ -289,6 +292,7 @@ class MusicProvider with ChangeNotifier {
         id: const Uuid().v4(),
         name: name,
         creationDate: DateTime.now(),
+        kind: kind,
       );
 
       await _dbHelper.insertPlaylist(newPlaylist);
@@ -299,12 +303,26 @@ class MusicProvider with ChangeNotifier {
     }
   }
 
-  Future<void> createPlaylistWithId(String id, String name) async {
+  /// Guarda [records] como referencias al final de la playlist online
+  /// [playlistId], sin repetir las que ya tiene. Devuelve cuántas se añadieron.
+  Future<int> saveRemoteTracksToPlaylist(String playlistId, List<RemoteTrackRecord> records) async {
+    try {
+      final added = await _dbHelper.addRemoteTracksToPlaylist(playlistId, records);
+      await loadPlaylists();
+      return added;
+    } catch (e) {
+      print('Error guardando referencias en la playlist online $playlistId: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> createPlaylistWithId(String id, String name, {String kind = Playlist.kindLocal}) async {
     try {
       final newPlaylist = Playlist(
         id: id,
         name: name,
         creationDate: DateTime.now(),
+        kind: kind,
       );
       await _dbHelper.insertPlaylist(newPlaylist);
       await loadPlaylists();
@@ -371,6 +389,38 @@ class MusicProvider with ChangeNotifier {
     _currentPlaylistSongs = songs;
     notifyListeners();
   }
+
+  /// Reproduce una playlist online por streaming (cola con la siguiente
+  /// pista pre-resuelta). Con [shuffle] la cola es la misma lista en orden
+  /// aleatorio, empezando por [startVideoId] si se indica. Devuelve
+  /// [OnlinePlayResult.streamingUnsupported] o [OnlinePlayResult.empty] para
+  /// que la pantalla muestre su mensaje (un fallo al arrancar se relanza); los fallos por pista los avisa el
+  /// handler por `streamErrors`. Los modos de repetición de la cola de
+  /// streaming siguen siendo los del handler (se desactivan al empezar).
+  Future<OnlinePlayResult> playOnlinePlaylist(
+    String playlistId,
+    AudioPlayerHandler handler,
+    StreamResolver resolver, {
+    String? startVideoId,
+    bool shuffle = false,
+  }) async {
+    try {
+      final records = await _dbHelper.getRemoteTracksForPlaylist(playlistId);
+      final plan = planOnlinePlayback(
+        records,
+        streamingSupported: streamingSupported,
+        startVideoId: startVideoId,
+        shuffle: shuffle,
+      );
+      if (plan.result != OnlinePlayResult.started) return plan.result;
+      await handler.playStreamQueue(plan.tracks, plan.startId, resolver, savedVideoIds: plan.savedIds);
+      return OnlinePlayResult.started;
+    } catch (e) {
+      print('Error reproduciendo la playlist online $playlistId: $e');
+      rethrow;
+    }
+  }
+
 
   /// Plays a tapped result from local search, queuing the rest of the
   /// current result set so next/previous stay within it — not tied to any
@@ -445,7 +495,7 @@ class MusicProvider with ChangeNotifier {
       // 5. Con las canciones huérfanas ya borradas, su carpeta debería haber
       // quedado vacía — si es así, se borra también en vez de dejarla para
       // que el usuario la borre a mano.
-      if (playlist != null && _libraryRootUri != null) {
+      if (playlist != null && !playlist.isOnline && _libraryRootUri != null) {
         await _storageService.deletePlaylistFolderIfEmpty(_libraryRootUri!, playlist.name);
       }
 

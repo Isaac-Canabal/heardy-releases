@@ -135,7 +135,8 @@ class CanonicalCloudIndex {
   final List<Map<String, dynamic>> songs;
   final List<Map<String, dynamic>> playlists;
   final List<Map<String, dynamic>> playlistSongs;
-  const CanonicalCloudIndex(this.songs, this.playlists, this.playlistSongs);
+  final List<Map<String, dynamic>> playlistRemoteTracks;
+  const CanonicalCloudIndex(this.songs, this.playlists, this.playlistSongs, [this.playlistRemoteTracks = const []]);
 }
 
 /// Colapsa los duplicados que la nube acumula por ser aditiva: la misma
@@ -147,8 +148,9 @@ class CanonicalCloudIndex {
 CanonicalCloudIndex canonicalizeCloudIndex(
   List<Map<String, dynamic>> songs,
   List<Map<String, dynamic>> playlists,
-  List<Map<String, dynamic>> playlistSongs,
-) {
+  List<Map<String, dynamic>> playlistSongs, [
+  List<Map<String, dynamic>> playlistRemoteTracks = const [],
+]) {
   final songRemap = <String, String>{};
   final songByHash = <String, Map<String, dynamic>>{};
   final outSongs = <Map<String, dynamic>>[];
@@ -178,7 +180,7 @@ CanonicalCloudIndex canonicalizeCloudIndex(
   final outPlaylists = <Map<String, dynamic>>[];
   for (final playlist in playlists) {
     final id = playlist['playlistId'] as String?;
-    final key = playlistNameKey(playlist['name'] as String?);
+    final key = _kindedNameKey(playlist);
     if (key.isNotEmpty) {
       final first = playlistByName[key];
       if (first != null) {
@@ -208,7 +210,17 @@ CanonicalCloudIndex canonicalizeCloudIndex(
     if (!pairs.add('$playlistId $songId')) continue;
     outPlaylistSongs.add({...row, 'playlistId': playlistId, 'songId': songId});
   }
-  return CanonicalCloudIndex(outSongs, outPlaylists, outPlaylistSongs);
+  final remotePairs = <String>{};
+  final outRemote = <Map<String, dynamic>>[];
+  for (final row in playlistRemoteTracks) {
+    final rawPlaylist = row['playlistId'] as String?;
+    final videoId = row['videoId'] as String?;
+    if (rawPlaylist == null || videoId == null) continue;
+    final playlistId = playlistRemap[rawPlaylist] ?? rawPlaylist;
+    if (!remotePairs.add('$playlistId\u0000$videoId')) continue;
+    outRemote.add({...row, 'playlistId': playlistId});
+  }
+  return CanonicalCloudIndex(outSongs, outPlaylists, outPlaylistSongs, outRemote);
 }
 
 /// A qué playlist local corresponde cada playlist de la nube: el mismo id, o
@@ -269,10 +281,39 @@ const _playlistColumns = [
   'originalUrl',
 ];
 const _playlistSongColumns = ['playlistId', 'songId', 'orderIndex'];
+const _remoteTrackColumns = [
+  'videoId',
+  'title',
+  'artist',
+  'album',
+  'durationSeconds',
+  'thumbnailUrl',
+  'sourceUrl',
+];
+const _playlistRemoteTrackColumns = ['playlistId', 'videoId', 'orderIndex'];
+
+const kPlaylistKindOnline = 'online';
 
 Map<String, dynamic> _project(Map<String, dynamic> row, List<String> columns) => {
       for (final column in columns) column: row[column],
     };
+
+/// `kind` sólo viaja cuando es 'online': una playlist local no lleva la
+/// clave, así que un servidor anterior a las playlists online (que rechaza
+/// campos desconocidos) sigue recibiendo exactamente lo de siempre.
+Map<String, dynamic> _projectPlaylist(Map<String, dynamic> row) => {
+      ..._project(row, _playlistColumns),
+      if (isOnlinePlaylistRow(row)) 'kind': kPlaylistKindOnline,
+    };
+
+bool isOnlinePlaylistRow(Map<String, dynamic> row) => row['kind'] == kPlaylistKindOnline;
+
+/// Una playlist local y una online con el mismo nombre NO son la misma.
+String _kindedNameKey(Map<String, dynamic> row) {
+  final key = playlistNameKey(row['name'] as String?);
+  if (key.isEmpty) return '';
+  return isOnlinePlaylistRow(row) ? 'o|$key' : 'l|$key';
+}
 
 /// Une el índice de la nube DENTRO del índice local, produciendo un payload
 /// que siempre es un superconjunto de lo que la nube ya tiene.
@@ -296,6 +337,14 @@ Map<String, dynamic> _project(Map<String, dynamic> row, List<String> columns) =>
 /// la nube se reescriben a ese id: si no, la misma canción acabaría dos veces
 /// en el índice con dos identidades.
 ///
+/// **Playlists online** (`kind: 'online'`): sus pistas son referencias por
+/// `videoId` (`remoteTracks` / `playlistRemoteTracks`), no archivos. Misma
+/// regla aditiva: si la playlist ya existe acá se unen las pistas (el orden
+/// local primero, las que sólo tiene la nube al final en el orden de la
+/// nube) y nunca se quita ninguna. Una playlist online y una local jamás se
+/// emparejan por nombre. El resultado lleva siempre `remoteTracks` y
+/// `playlistRemoteTracks` (vacías si no hay).
+///
 /// Contrapartida aceptada, y es la que manda la regla aditiva: borrar una
 /// canción en este equipo ya no la borra de la nube. Un borrado explícito
 /// tendría que viajar como tal (una lápida), no como la ausencia de una fila
@@ -306,6 +355,9 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
   required List<Map<String, dynamic>> cloudSongs,
   required List<Map<String, dynamic>> cloudPlaylists,
   required List<Map<String, dynamic>> cloudPlaylistSongs,
+  List<Map<String, dynamic>> cloudOnlinePlaylists = const [],
+  List<Map<String, dynamic>> cloudRemoteTracks = const [],
+  List<Map<String, dynamic>> cloudPlaylistRemoteTracks = const [],
 }) {
   final localSongs = local['songs'] ?? const [];
   final localPlaylists = local['playlists'] ?? const [];
@@ -360,7 +412,7 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     if (hash != null && hash.isNotEmpty) localIdByHash.putIfAbsent(hash, () => id);
   }
 
-  final playlists = [for (final row in localPlaylists) _project(row, _playlistColumns)];
+  final playlists = [for (final row in localPlaylists) _projectPlaylist(row)];
   final playlistIds = <String>{
     for (final row in playlists)
       if (row['playlistId'] is String) row['playlistId'] as String,
@@ -371,18 +423,24 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
   };
   // Misma playlist con otro id (borrada y vuelta a crear, o creada por el
   // escáner desde su carpeta): gana la local, igual que con las canciones.
+  // Sólo dentro del mismo tipo.
   final localIdByName = <String, String>{};
   for (final row in playlists) {
-    final key = playlistNameKey(row['name'] as String?);
+    final key = _kindedNameKey(row);
     final id = row['playlistId'];
     if (key.isNotEmpty && id is String) localIdByName.putIfAbsent(key, () => id);
   }
   final playlistIdRemap = <String, String>{};
-  for (final cloudPlaylist in cloudPlaylists) {
+  final allCloudPlaylists = [
+    ...cloudPlaylists,
+    for (final row in cloudOnlinePlaylists) {...row, 'kind': kPlaylistKindOnline},
+  ];
+  for (final cloudPlaylist in allCloudPlaylists) {
     var id = cloudPlaylist['playlistId'] as String?;
     final name = cloudPlaylist['name'] as String?;
     if (id == null || id.isEmpty || name == null || name.isEmpty) continue;
-    final sameNameId = playlistIds.contains(id) ? null : localIdByName[playlistNameKey(name)];
+    final nameKey = _kindedNameKey(cloudPlaylist);
+    final sameNameId = playlistIds.contains(id) ? null : localIdByName[nameKey];
     if (sameNameId != null) {
       playlistIdRemap[id] = sameNameId;
       id = sameNameId;
@@ -402,17 +460,20 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
       }
       continue;
     }
-    playlists.add(_project(cloudPlaylist, _playlistColumns));
+    playlists.add(_projectPlaylist(cloudPlaylist));
     playlistRowById[id] = playlists.last;
-    final key = playlistNameKey(name);
-    if (key.isNotEmpty) localIdByName.putIfAbsent(key, () => id!);
+    if (nameKey.isNotEmpty) localIdByName.putIfAbsent(nameKey, () => id!);
   }
+  final onlinePlaylistIds = <String>{
+    for (final row in playlists)
+      if (isOnlinePlaylistRow(row) && row['playlistId'] is String) row['playlistId'] as String,
+  };
 
   final playlistSongs = [
     for (final row in localPlaylistSongs) _project(row, _playlistSongColumns),
   ];
   final pairs = <String>{
-    for (final row in playlistSongs) '${row['playlistId']} ${row['songId']}',
+    for (final row in playlistSongs) '${row['playlistId']}\u0000${row['songId']}',
   };
   for (final cloudRow in cloudPlaylistSongs) {
     final rawPlaylistId = cloudRow['playlistId'] as String?;
@@ -424,7 +485,8 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     // resultado: el servidor no tiene claves foráneas acá, así que una fila
     // huérfana se quedaría para siempre sin que nada la limpie.
     if (!playlistIds.contains(playlistId) || !songIds.contains(songId)) continue;
-    if (!pairs.add('$playlistId $songId')) continue;
+    if (onlinePlaylistIds.contains(playlistId)) continue;
+    if (!pairs.add('$playlistId\u0000$songId')) continue;
     playlistSongs.add({
       'playlistId': playlistId,
       'songId': songId,
@@ -432,5 +494,148 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     });
   }
 
-  return {'songs': songs, 'playlists': playlists, 'playlistSongs': playlistSongs};
+  final remoteTracks = [
+    for (final row in local['remoteTracks'] ?? const <Map<String, dynamic>>[])
+      _project(row, _remoteTrackColumns),
+  ];
+  final remoteById = <String, Map<String, dynamic>>{
+    for (final row in remoteTracks)
+      if (row['videoId'] is String) row['videoId'] as String: row,
+  };
+  for (final cloudTrack in cloudRemoteTracks) {
+    final id = cloudTrack['videoId'] as String?;
+    final title = cloudTrack['title'] as String?;
+    if (id == null || id.isEmpty || title == null || title.isEmpty) continue;
+    final existing = remoteById[id];
+    if (existing != null) {
+      // Lo local gana; sólo se rellenan los huecos.
+      for (final column in const ['artist', 'album', 'thumbnailUrl', 'sourceUrl']) {
+        if ((existing[column] as String?)?.isNotEmpty != true &&
+            (cloudTrack[column] as String?)?.isNotEmpty == true) {
+          existing[column] = cloudTrack[column];
+        }
+      }
+      existing['durationSeconds'] ??= cloudTrack['durationSeconds'];
+      continue;
+    }
+    remoteTracks.add(_project(cloudTrack, _remoteTrackColumns));
+    remoteById[id] = remoteTracks.last;
+  }
+
+  final playlistRemoteTracks = [
+    for (final row in local['playlistRemoteTracks'] ?? const <Map<String, dynamic>>[])
+      _project(row, _playlistRemoteTrackColumns),
+  ];
+  final remotePairs = <String>{
+    for (final row in playlistRemoteTracks) '${row['playlistId']}\u0000${row['videoId']}',
+  };
+  final nextRemoteOrder = <String, int>{};
+  for (final row in playlistRemoteTracks) {
+    final id = '${row['playlistId']}';
+    final order = (row['orderIndex'] as num?)?.toInt() ?? 0;
+    if (order + 1 > (nextRemoteOrder[id] ?? 0)) nextRemoteOrder[id] = order + 1;
+  }
+  // Orden estable por el orden de la nube (el índice original desempata).
+  final cloudMembership = [
+    for (var i = 0; i < cloudPlaylistRemoteTracks.length; i++) (i, cloudPlaylistRemoteTracks[i]),
+  ]..sort((a, b) {
+      final byOrder = ((a.$2['orderIndex'] as num?)?.toInt() ?? 0)
+          .compareTo((b.$2['orderIndex'] as num?)?.toInt() ?? 0);
+      return byOrder != 0 ? byOrder : a.$1.compareTo(b.$1);
+    });
+  for (final (_, cloudRow) in cloudMembership) {
+    final rawPlaylistId = cloudRow['playlistId'] as String?;
+    final videoId = cloudRow['videoId'] as String?;
+    if (rawPlaylistId == null || videoId == null) continue;
+    final playlistId = playlistIdRemap[rawPlaylistId] ?? rawPlaylistId;
+    if (!onlinePlaylistIds.contains(playlistId) || !remoteById.containsKey(videoId)) continue;
+    if (!remotePairs.add('$playlistId\u0000$videoId')) continue;
+    final next = nextRemoteOrder[playlistId] ?? 0;
+    nextRemoteOrder[playlistId] = next + 1;
+    playlistRemoteTracks.add({'playlistId': playlistId, 'videoId': videoId, 'orderIndex': next});
+  }
+
+  return {
+    'songs': songs,
+    'playlists': playlists,
+    'playlistSongs': playlistSongs,
+    'remoteTracks': remoteTracks,
+    'playlistRemoteTracks': playlistRemoteTracks,
+  };
+}
+
+/// Qué hay que crear o completar en la base local para que las playlists
+/// online del índice unido ([merged], salida de [unionCloudIntoLocalIndex])
+/// existan también acá.
+class OnlinePlaylistImport {
+  final String playlistId;
+  final String name;
+  final String? originalUrl;
+
+  /// `true` si la playlist no existe localmente y hay que crearla.
+  final bool isNew;
+
+  /// Pistas que a la playlist local le faltan, en el orden del índice unido
+  /// (que es: lo local primero, lo de la nube después). Cada una con las
+  /// columnas de `remote_tracks`.
+  final List<Map<String, dynamic>> tracks;
+
+  const OnlinePlaylistImport({
+    required this.playlistId,
+    required this.name,
+    required this.originalUrl,
+    required this.isNew,
+    required this.tracks,
+  });
+}
+
+/// Compara el índice unido contra el local y devuelve sólo lo que falta
+/// materializar de las playlists online. Puro y aditivo: nunca incluye nada
+/// que quitar. [local] es la salida de `getLibraryIndexRows(includeOnline:
+/// true)`.
+List<OnlinePlaylistImport> planOnlineMaterialization({
+  required Map<String, List<Map<String, dynamic>>> local,
+  required Map<String, List<Map<String, dynamic>>> merged,
+}) {
+  final localPlaylistIds = {
+    for (final row in local['playlists'] ?? const <Map<String, dynamic>>[])
+      if (row['playlistId'] is String) row['playlistId'] as String,
+  };
+  final localPairs = {
+    for (final row in local['playlistRemoteTracks'] ?? const <Map<String, dynamic>>[])
+      '${row['playlistId']}\u0000${row['videoId']}',
+  };
+  final trackById = {
+    for (final row in merged['remoteTracks'] ?? const <Map<String, dynamic>>[])
+      if (row['videoId'] is String) row['videoId'] as String: row,
+  };
+  final membersByPlaylist = <String, List<Map<String, dynamic>>>{};
+  for (final row in merged['playlistRemoteTracks'] ?? const <Map<String, dynamic>>[]) {
+    membersByPlaylist.putIfAbsent('${row['playlistId']}', () => []).add(row);
+  }
+
+  final plan = <OnlinePlaylistImport>[];
+  for (final playlist in merged['playlists'] ?? const <Map<String, dynamic>>[]) {
+    if (!isOnlinePlaylistRow(playlist)) continue;
+    final id = playlist['playlistId'] as String?;
+    if (id == null) continue;
+    final members = [...(membersByPlaylist[id] ?? const <Map<String, dynamic>>[])]
+      ..sort((a, b) => ((a['orderIndex'] as num?)?.toInt() ?? 0)
+          .compareTo((b['orderIndex'] as num?)?.toInt() ?? 0));
+    final missing = [
+      for (final member in members)
+        if (!localPairs.contains('$id\u0000${member['videoId']}') && trackById[member['videoId']] != null)
+          trackById[member['videoId']]!,
+    ];
+    final isNew = !localPlaylistIds.contains(id);
+    if (!isNew && missing.isEmpty) continue;
+    plan.add(OnlinePlaylistImport(
+      playlistId: id,
+      name: (playlist['name'] as String?) ?? '',
+      originalUrl: playlist['originalUrl'] as String?,
+      isNew: isNew,
+      tracks: missing,
+    ));
+  }
+  return plan;
 }

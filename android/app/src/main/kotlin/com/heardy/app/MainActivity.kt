@@ -10,9 +10,36 @@ import java.util.concurrent.Executors
 class MainActivity: AudioServiceActivity() {
     private val waveformExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val volumeLeveler = VolumeLeveler()
+    private val multicastLock by lazy { MulticastLockHolder(this) }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "heardy/volume_leveler")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "enable" -> {
+                        val sessionId = call.argument<Int>("sessionId") ?: 0
+                        result.success(volumeLeveler.enable(sessionId))
+                    }
+                    "disable" -> {
+                        volumeLeveler.disable()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "heardy/multicast_lock")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "acquire" -> result.success(multicastLock.acquire())
+                    "release" -> {
+                        multicastLock.release()
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "heardy/waveform")
             .setMethodCallHandler { call, result ->
                 if (call.method != "extract") {
@@ -41,6 +68,8 @@ class MainActivity: AudioServiceActivity() {
 
     override fun onDestroy() {
         waveformExecutor.shutdown()
+        volumeLeveler.disable()
+        multicastLock.release()
         super.onDestroy()
     }
 }

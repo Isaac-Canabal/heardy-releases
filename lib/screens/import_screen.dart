@@ -2,18 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../providers/auth_provider.dart';
 import '../providers/download_provider.dart';
 import '../providers/music_provider.dart';
-import '../providers/settings_provider.dart';
-import '../screens/auth/login_screen.dart';
 import '../services/download_source.dart';
+import '../models/playlist.dart';
 import '../services/friendly_error.dart';
+import '../services/import_destination_logic.dart';
 import '../services/spotify_match.dart';
 import '../services/spotify_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/download_progress_card.dart';
 import '../widgets/playlist_target_sheet.dart';
+import '../widgets/remote_track_actions_mixin.dart';
 import '../l10n/app_localizations.dart';
 import 'package:heardy/services/app_log.dart';
 import '../services/input_sanitizer.dart';
@@ -61,67 +61,14 @@ class _ImportScreenState extends State<ImportScreen> {
   SpotifyAnalysisResult? _analyzedSpotify;
   List<SpotifyMatch>? _analyzedSpotifyMatches;
 
-  /// Cupo diario de canciones (Fase 3 del plan de seguridad, D-2: mostrar el
-  /// resto disponible para que no sea una sorpresa al chocarse contra el
-  /// límite). `null` mientras no se conoce todavía; `UsageStatus.disabled`
-  /// (dailyLimit == 0) esconde el indicador — no hay cupo activo, o no se
-  /// pudo consultar, y ninguno de los dos amerita mostrar nada.
-  UsageStatus? _usage;
-
-  /// Guardado una vez en [initState], nunca vuelto a leer de [context] en
-  /// [dispose] — hacerlo ahí es inseguro (el árbol de widgets ya puede estar
-  /// desactivado cuando `dispose()` corre), y es exactamente el error que
-  /// `flutter test` detectó al principio de esta implementación.
-  late final DownloadProvider _downloadProvider;
-  late final HeardyAuthProvider _authProvider;
-  bool _wasAuthReady = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _downloadProvider = context.read<DownloadProvider>();
-    _authProvider = context.read<HeardyAuthProvider>();
-    _wasAuthReady = _authProvider.isReady;
-    _authProvider.addListener(_onAuthChanged);
-    _refreshUsage();
-    // Una descarga real (no sólo encolarla) es lo que de verdad cambia el
-    // cupo usado — se entera server-side recién cuando /audio entrega los
-    // bytes. `isProcessing` pasando a false es la señal más barata de "la
-    // cola acaba de dejar de trabajar", sin inventar un polling propio.
-    _downloadProvider.addListener(_onQueueChanged);
-  }
+  /// Respuesta a "¿solo esta canción o la playlist completa?" del último
+  /// análisis; null si no hizo falta preguntar.
+  bool? _choseWholePlaylist;
 
   @override
   void dispose() {
-    _downloadProvider.removeListener(_onQueueChanged);
-    _authProvider.removeListener(_onAuthChanged);
     _urlController.dispose();
     super.dispose();
-  }
-
-  void _onQueueChanged() {
-    if (!_downloadProvider.isProcessing) _refreshUsage();
-  }
-
-  /// El cupo se consulta con la identidad de quien esté en sesión, así que
-  /// la consulta de [initState] se va con un 401 (y queda en
-  /// `UsageStatus.disabled`) si la pantalla se abrió sin sesión lista. Esta
-  /// pantalla vive en un IndexedStack y no se reconstruye al volver del
-  /// login, así que sin esto la línea "te quedan N de 150" no aparecería
-  /// hasta después de la primera descarga. Sólo en el flanco false -> true:
-  /// [HeardyAuthProvider] notifica también en cada refresco de token, y no
-  /// hace falta repreguntar por eso.
-  void _onAuthChanged() {
-    final ready = _authProvider.isReady;
-    if (ready == _wasAuthReady) return;
-    _wasAuthReady = ready;
-    if (ready) _refreshUsage();
-  }
-
-  Future<void> _refreshUsage() async {
-    final result = await context.read<DownloadSource>().usage();
-    if (!mounted) return;
-    setState(() => _usage = result);
   }
 
   void _clearAnalysis() {
@@ -139,6 +86,57 @@ class _ImportScreenState extends State<ImportScreen> {
     return uri?.queryParameters['list'] != null;
   }
 
+  Future<bool?> _askSongOrPlaylist() {
+    final l10n = AppLocalizations.of(context)!;
+    return showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: AppTheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                l10n.importChoiceTitle,
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                key: const Key('import_choice_song'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.music_note_rounded, size: 18),
+                label: Text(l10n.importChoiceSongOnly),
+                onPressed: () => Navigator.pop(sheetContext, false),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                key: const Key('import_choice_playlist'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.08),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.queue_music_rounded, size: 18),
+                label: Text(l10n.importChoicePlaylist),
+                onPressed: () => Navigator.pop(sheetContext, true),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pasteFromClipboard() async {
     final data = await Clipboard.getData(Clipboard.kTextPlain);
     final text = data?.text?.trim();
@@ -151,9 +149,16 @@ class _ImportScreenState extends State<ImportScreen> {
     final url = sanitizeUrlInput(_urlController.text);
     if (url.isEmpty) return;
 
+    bool? wholePlaylist;
+    if (needsSongOrPlaylistQuestion(url)) {
+      wholePlaylist = await _askSongOrPlaylist();
+      if (wholePlaylist == null || !mounted) return;
+    }
+
     setState(() {
       _isAnalyzing = true;
       _clearAnalysis();
+      _choseWholePlaylist = wholePlaylist;
     });
 
     try {
@@ -175,7 +180,7 @@ class _ImportScreenState extends State<ImportScreen> {
           _analyzedSpotify = spotify;
           _analyzedSpotifyMatches = matches;
         });
-      } else if (_looksLikePlaylist(url)) {
+      } else if (wholePlaylist ?? _looksLikePlaylist(url)) {
         final playlist = await source.resolvePlaylist(url);
         if (!mounted) return;
         setState(() {
@@ -183,7 +188,7 @@ class _ImportScreenState extends State<ImportScreen> {
           _analyzedPlaylist = playlist;
         });
       } else {
-        final track = await source.resolve(url);
+        final track = await source.resolve(wholePlaylist == false ? songOnlyUrl(url) : url);
         if (!mounted) return;
         setState(() {
           _analyzedKind = _UrlKind.video;
@@ -222,16 +227,17 @@ class _ImportScreenState extends State<ImportScreen> {
   Future<void> _saveForLater() async {
     final url = sanitizeUrlInput(_urlController.text);
     if (url.isEmpty) return;
-    final isPlaylist = _looksLikePlaylist(url);
+    final isPlaylist = _choseWholePlaylist ?? _looksLikePlaylist(url);
+    final pendingUrl = _choseWholePlaylist == false ? songOnlyUrl(url) : url;
 
-    final choice = await pickTargetPlaylist(context);
+    final choice = await pickTargetPlaylist(context, kind: Playlist.kindLocal);
     if (choice == null || !mounted) return;
     final playlistId = await resolveTargetPlaylistId(context, choice);
     if (playlistId == null || !mounted) return;
 
     final provider = context.read<DownloadProvider>();
     final added = await provider.addPendingImport(
-      sourceUrl: url,
+      sourceUrl: pendingUrl,
       playlistId: playlistId,
       isPlaylist: isPlaylist,
     );
@@ -246,11 +252,25 @@ class _ImportScreenState extends State<ImportScreen> {
     );
   }
 
+  Future<void> _saveAsReferences(
+    PlaylistDestination destination,
+    List<RemoteTrack> tracks, {
+    String suffix = '',
+  }) async {
+    final saved = await saveRemoteTracksToOnlinePlaylist(context, destination, tracks, suffix: suffix);
+    if (saved < 0 || !mounted) return;
+    setState(_clearAnalysis);
+    _urlController.clear();
+  }
+
   Future<void> _downloadTrack(RemoteTrack track) async {
-    final choice = await pickTargetPlaylist(context);
-    if (choice == null || !mounted) return;
-    final playlistId = await resolveTargetPlaylistId(context, choice);
-    if (playlistId == null || !mounted) return;
+    final destination = await pickPlaylistDestination(context);
+    if (destination == null || !mounted) return;
+    if (destinationActionForKind(destination.kind) == DestinationAction.saveReferences) {
+      await _saveAsReferences(destination, [track]);
+      return;
+    }
+    final playlistId = destination.id;
 
     final provider = context.read<DownloadProvider>();
     final added = await provider.enqueueTrack(
@@ -271,16 +291,19 @@ class _ImportScreenState extends State<ImportScreen> {
   }
 
   Future<void> _downloadPlaylist(RemotePlaylist playlist) async {
-    final choice = await pickTargetPlaylist(context, suggestedName: playlist.name);
-    if (choice == null || !mounted) return;
+    final destination = await pickPlaylistDestination(context, suggestedName: playlist.name);
+    if (destination == null || !mounted) return;
+    if (destinationActionForKind(destination.kind) == DestinationAction.saveReferences) {
+      await _saveAsReferences(destination, playlist.entries);
+      return;
+    }
 
     // Si se crea una playlist nueva a partir de esta importación, guardamos
     // la URL de origen — es lo que activa "Actualizar desde YouTube" en
     // playlist_detail_screen.dart. Si el destino es una playlist YA
     // existente, no la tocamos: podría no ser de origen YouTube.
-    final isNewPlaylist = choice.existingPlaylistId == null;
-    final playlistId = await resolveTargetPlaylistId(context, choice);
-    if (playlistId == null || !mounted) return;
+    final isNewPlaylist = destination.isNew;
+    final playlistId = destination.id;
     if (isNewPlaylist && playlist.sourceUrl.isNotEmpty) {
       await context.read<MusicProvider>().updatePlaylistUrl(playlistId, playlist.sourceUrl);
     }
@@ -306,13 +329,22 @@ class _ImportScreenState extends State<ImportScreen> {
     final acceptable = matches.where((m) => m.isAcceptable).toList();
     if (acceptable.isEmpty) return;
 
-    final choice = await pickTargetPlaylist(
+    final destination = await pickPlaylistDestination(
       context,
       suggestedName: spotify.isCollection ? spotify.name : null,
     );
-    if (choice == null || !mounted) return;
-    final playlistId = await resolveTargetPlaylistId(context, choice);
-    if (playlistId == null || !mounted) return;
+    if (destination == null || !mounted) return;
+    final skipped = matches.length - acceptable.length;
+    final l10n = AppLocalizations.of(context)!;
+    if (destinationActionForKind(destination.kind) == DestinationAction.saveReferences) {
+      await _saveAsReferences(
+        destination,
+        [for (final m in acceptable) m.youtubeTrack!],
+        suffix: skipped == 0 ? '' : l10n.importSpotifySkippedSuffix(skipped),
+      );
+      return;
+    }
+    final playlistId = destination.id;
 
     final provider = context.read<DownloadProvider>();
     var added = 0;
@@ -334,8 +366,6 @@ class _ImportScreenState extends State<ImportScreen> {
     _urlController.clear();
     provider.processQueue();
 
-    final skipped = matches.length - acceptable.length;
-    final l10n = AppLocalizations.of(context)!;
     _showSnack(
       (skipped == 0
               ? l10n.importSongsQueuedSnack(added)
@@ -352,16 +382,9 @@ class _ImportScreenState extends State<ImportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final settings = context.watch<SettingsProvider>();
     final libraryRootUri = context.watch<MusicProvider>().libraryRootUri;
     final l10n = AppLocalizations.of(context)!;
 
-    if (!settings.hasDownloadServer) return _buildNoServerState();
-    // Fase 2 del plan de seguridad: descargar exige sesión (identidad real
-    // en vez de la clave compilada de antes); el resto de la app —
-    // biblioteca local, playlists, reproducción— no. Este chequeo vive sólo
-    // en esta pantalla y en SearchScreen, no como un gate global.
-    if (!context.watch<HeardyAuthProvider>().isReady) return _buildAuthRequiredState();
     if (libraryRootUri == null) return _buildNoFolderState();
 
     return SafeArea(
@@ -375,16 +398,6 @@ class _ImportScreenState extends State<ImportScreen> {
               style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5),
             ),
           ),
-          if (_usage != null && _usage!.isEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
-              child: Text(
-                _usage!.isMonthly
-                    ? l10n.importMonthlyQuotaRemaining(_usage!.remaining, _usage!.monthlyLimit)
-                    : l10n.importDailyQuotaRemaining(_usage!.remaining, _usage!.dailyLimit),
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 12),
-              ),
-            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
             child: Row(
@@ -450,66 +463,6 @@ class _ImportScreenState extends State<ImportScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildNoServerState() {
-    final l10n = AppLocalizations.of(context)!;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.dns_outlined, size: 56, color: Colors.white.withValues(alpha: 0.3)),
-            const SizedBox(height: 16),
-            Text(
-              l10n.searchNoServerTitle,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              l10n.importNoServerBody,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAuthRequiredState() {
-    final l10n = AppLocalizations.of(context)!;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.lock_outline_rounded, size: 56, color: Colors.white.withValues(alpha: 0.3)),
-            const SizedBox(height: 16),
-            Text(
-              l10n.authRequiredTitle,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              l10n.authRequiredBody,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 20),
-            FilledButton(
-              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LoginScreen())),
-              child: Text(l10n.authRequiredButton),
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -712,7 +665,7 @@ class _ImportScreenState extends State<ImportScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              icon: const Icon(Icons.download_rounded, size: 18),
+              icon: const Icon(Icons.playlist_add_rounded, size: 18),
               label: Text(l10n.importDownloadButton),
               onPressed: () => _downloadTrack(track),
             ),
@@ -855,7 +808,7 @@ class _ImportScreenState extends State<ImportScreen> {
                 padding: const EdgeInsets.symmetric(vertical: 13),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
-              icon: const Icon(Icons.download_rounded, size: 18),
+              icon: const Icon(Icons.playlist_add_rounded, size: 18),
               label: Text(acceptable == 0 ? l10n.importSpotifyNoMatchesButton : l10n.importDownloadCountButton(acceptable)),
               onPressed: acceptable == 0 ? null : () => _downloadSpotifyMatches(spotify, matches),
             ),

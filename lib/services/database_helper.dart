@@ -2,7 +2,9 @@ import 'dart:io';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/song.dart';
+import '../models/statistics_data.dart' show mergeTopSongRows;
 import '../models/playlist.dart';
+import '../models/remote_track_record.dart';
 import '../models/history_entry.dart';
 import 'explore_logic.dart' show youtubeVideoId;
 import 'history_logic.dart' show maxStreamHistoryRows;
@@ -28,7 +30,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 15,
+      version: 16,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: _onConfigure,
@@ -71,7 +73,8 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         creationDate TEXT NOT NULL,
         sortOrder INTEGER NOT NULL DEFAULT 0,
-        originalUrl TEXT
+        originalUrl TEXT,
+        kind TEXT NOT NULL DEFAULT 'local'
       )
     ''');
 
@@ -118,6 +121,9 @@ class DatabaseHelper {
     );
     await db.execute(_createStreamHistorySql);
     await db.execute(_createStreamHistoryIndexSql);
+    for (final sql in _onlinePlaylistSql) {
+      await db.execute(sql);
+    }
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -258,7 +264,54 @@ class DatabaseHelper {
       await db.execute(_createStreamHistorySql);
       await db.execute(_createStreamHistoryIndexSql);
     }
+    if (oldVersion < 16) {
+      // Playlists online: referencias a YouTube que suenan por streaming.
+      // `songs` no se toca, así que la bandeja, el escáner y "ya descargada"
+      // no ven estas pistas. Las playlists existentes quedan como 'local'.
+      await db.execute("ALTER TABLE playlists ADD COLUMN kind TEXT NOT NULL DEFAULT 'local'");
+      for (final sql in _onlinePlaylistSql) {
+        await db.execute(sql);
+      }
+    }
   }
+
+  static const _onlinePlaylistSql = [
+    '''
+      CREATE TABLE IF NOT EXISTS remote_tracks (
+        videoId TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        artist TEXT,
+        album TEXT,
+        durationSeconds INTEGER,
+        thumbnailUrl TEXT,
+        sourceUrl TEXT
+      )
+    ''',
+    '''
+      CREATE TABLE IF NOT EXISTS playlist_remote_tracks (
+        playlistId TEXT NOT NULL,
+        videoId TEXT NOT NULL,
+        orderIndex INTEGER NOT NULL,
+        PRIMARY KEY (playlistId, videoId),
+        FOREIGN KEY (playlistId) REFERENCES playlists (id) ON DELETE CASCADE,
+        FOREIGN KEY (videoId) REFERENCES remote_tracks (videoId)
+      )
+    ''',
+    // Mismas fechas y clave natural que `play_history` (videoId + hora local).
+    '''
+      CREATE TABLE IF NOT EXISTS remote_play_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        videoId TEXT NOT NULL,
+        playedAtLocal TEXT NOT NULL,
+        playedAtUtc TEXT,
+        playSeconds INTEGER NOT NULL,
+        syncedAt TEXT,
+        FOREIGN KEY (videoId) REFERENCES remote_tracks (videoId)
+      )
+    ''',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_remote_play_history_key ON remote_play_history(videoId, playedAtLocal)',
+    'CREATE INDEX IF NOT EXISTS idx_remote_play_history_synced ON remote_play_history(syncedAt)',
+  ];
 
   /// Una fila por pista (clave = id de vídeo): volver a oírla actualiza
   /// `playedAt`. Sin FK: no hay canción local detrás.
@@ -644,9 +697,37 @@ class DatabaseHelper {
     });
   }
 
-  Future<({int songCount, int totalSeconds, String? coverArtPath})>
+  /// Para una online, [thumbnailUrl] es la miniatura de la primera pista y
+  /// [coverArtPath] es null; para una local ocurre lo contrario.
+  Future<({int songCount, int totalSeconds, String? coverArtPath, String? thumbnailUrl})>
       getPlaylistSummary(String playlistId) async {
     final db = await database;
+    final kindRows = await db.query(
+      'playlists',
+      columns: ['kind'],
+      where: 'id = ?',
+      whereArgs: [playlistId],
+    );
+    if (kindRows.isNotEmpty && kindRows.first['kind'] == Playlist.kindOnline) {
+      final remote = await db.rawQuery('''
+        SELECT rt.durationSeconds, rt.thumbnailUrl
+        FROM playlist_remote_tracks prt
+        JOIN remote_tracks rt ON rt.videoId = prt.videoId
+        WHERE prt.playlistId = ?
+        ORDER BY prt.orderIndex ASC
+      ''', [playlistId]);
+      var total = 0;
+      for (final row in remote) {
+        total += row['durationSeconds'] as int? ?? 0;
+      }
+      final thumb = remote.isEmpty ? null : remote.first['thumbnailUrl'] as String?;
+      return (
+        songCount: remote.length,
+        totalSeconds: total,
+        coverArtPath: null,
+        thumbnailUrl: thumb != null && thumb.isNotEmpty ? thumb : null,
+      );
+    }
     final rows = await db.rawQuery('''
       SELECT s.duration, s.artPath
       FROM playlist_songs ps
@@ -656,7 +737,7 @@ class DatabaseHelper {
     ''', [playlistId]);
 
     if (rows.isEmpty) {
-      return (songCount: 0, totalSeconds: 0, coverArtPath: null);
+      return (songCount: 0, totalSeconds: 0, coverArtPath: null, thumbnailUrl: null);
     }
 
     var total = 0;
@@ -668,6 +749,7 @@ class DatabaseHelper {
       songCount: rows.length,
       totalSeconds: total,
       coverArtPath: cover != null && cover.isNotEmpty ? cover : null,
+      thumbnailUrl: null,
     );
   }
 
@@ -709,11 +791,178 @@ class DatabaseHelper {
   Future<void> deletePlaylist(String id) async {
     final db = await database;
     // Foreign key constraint (ON DELETE CASCADE) will automatically delete associated playlist_songs rows.
-    await db.delete(
-      'playlists',
-      where: 'id = ?',
-      whereArgs: [id],
+    await db.transaction((txn) async {
+      await txn.delete(
+        'playlists',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await _pruneOrphanRemoteTracks(txn);
+    });
+  }
+
+  // --- ONLINE PLAYLISTS (remote_tracks) ---
+
+  /// Guarda o actualiza la referencia sin pisar con vacío los campos que ya
+  /// se conocían.
+  Future<void> upsertRemoteTrack(RemoteTrackRecord track) async {
+    final db = await database;
+    await _upsertRemoteTrack(db, track);
+  }
+
+  Future<void> _upsertRemoteTrack(DatabaseExecutor db, RemoteTrackRecord t) {
+    return db.rawInsert('''
+      INSERT INTO remote_tracks (videoId, title, artist, album, durationSeconds, thumbnailUrl, sourceUrl)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(videoId) DO UPDATE SET
+        title = excluded.title,
+        artist = COALESCE(NULLIF(excluded.artist, ''), remote_tracks.artist),
+        album = COALESCE(NULLIF(excluded.album, ''), remote_tracks.album),
+        durationSeconds = COALESCE(excluded.durationSeconds, remote_tracks.durationSeconds),
+        thumbnailUrl = COALESCE(NULLIF(excluded.thumbnailUrl, ''), remote_tracks.thumbnailUrl),
+        sourceUrl = COALESCE(NULLIF(excluded.sourceUrl, ''), remote_tracks.sourceUrl)
+    ''', [t.videoId, t.title, t.artist, t.album, t.durationSeconds, t.thumbnailUrl, t.sourceUrl]);
+  }
+
+  /// Añade [tracks] al final de una playlist online, sin repetir ids de vídeo
+  /// (ni dentro de la lista ni contra lo ya guardado). Devuelve cuántas
+  /// entraron; una playlist local no admite referencias y devuelve 0.
+  Future<int> addRemoteTracksToPlaylist(String playlistId, List<RemoteTrackRecord> tracks) async {
+    final db = await database;
+    return db.transaction((txn) async {
+      final kind = await txn.query(
+        'playlists',
+        columns: ['kind'],
+        where: 'id = ?',
+        whereArgs: [playlistId],
+      );
+      if (kind.isEmpty || kind.first['kind'] != Playlist.kindOnline) {
+        appLog('addRemoteTracksToPlaylist: $playlistId no es una playlist online');
+        return 0;
+      }
+      final present = {
+        for (final r in await txn.query(
+          'playlist_remote_tracks',
+          columns: ['videoId'],
+          where: 'playlistId = ?',
+          whereArgs: [playlistId],
+        ))
+          r['videoId'] as String,
+      };
+      var next = (Sqflite.firstIntValue(await txn.rawQuery(
+                'SELECT MAX(orderIndex) FROM playlist_remote_tracks WHERE playlistId = ?',
+                [playlistId],
+              )) ??
+              -1) +
+          1;
+      var added = 0;
+      for (final track in tracks) {
+        if (track.videoId.isEmpty || !present.add(track.videoId)) continue;
+        await _upsertRemoteTrack(txn, track);
+        await txn.insert('playlist_remote_tracks', {
+          'playlistId': playlistId,
+          'videoId': track.videoId,
+          'orderIndex': next++,
+        });
+        added++;
+      }
+      return added;
+    });
+  }
+
+  Future<void> removeRemoteTrackFromPlaylist(String playlistId, String videoId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete(
+        'playlist_remote_tracks',
+        where: 'playlistId = ? AND videoId = ?',
+        whereArgs: [playlistId, videoId],
+      );
+      await _pruneOrphanRemoteTracks(txn);
+    });
+  }
+
+  Future<void> reorderRemoteTracks(String playlistId, List<String> videoIds) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      for (var i = 0; i < videoIds.length; i++) {
+        await txn.update(
+          'playlist_remote_tracks',
+          {'orderIndex': i},
+          where: 'playlistId = ? AND videoId = ?',
+          whereArgs: [playlistId, videoIds[i]],
+        );
+      }
+    });
+  }
+
+  Future<List<RemoteTrackRecord>> getRemoteTracksForPlaylist(String playlistId) async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT rt.* FROM remote_tracks rt
+      JOIN playlist_remote_tracks prt ON prt.videoId = rt.videoId
+      WHERE prt.playlistId = ?
+      ORDER BY prt.orderIndex ASC
+    ''', [playlistId]);
+    return rows.map(RemoteTrackRecord.fromMap).toList();
+  }
+
+  /// Una referencia que ninguna playlist usa y que el historial no necesita
+  /// ya no tiene razón de existir.
+  Future<void> _pruneOrphanRemoteTracks(DatabaseExecutor db) {
+    return db.rawDelete('''
+      DELETE FROM remote_tracks
+      WHERE videoId NOT IN (SELECT videoId FROM playlist_remote_tracks)
+        AND videoId NOT IN (SELECT videoId FROM remote_play_history)
+    ''');
+  }
+
+  Future<Set<String>> getRemoteTrackIds() async {
+    final db = await database;
+    return {
+      for (final r in await db.query('remote_tracks', columns: ['videoId'])) r['videoId'] as String,
+    };
+  }
+
+  /// Anota una escucha de una pista guardada. Devuelve false si ya existía
+  /// (misma clave natural que el historial local) o si la pista no es una
+  /// referencia guardada.
+  Future<bool> insertRemotePlay(
+    String videoId,
+    String playedAtLocal,
+    String? playedAtUtc,
+    int playSeconds,
+  ) async {
+    final db = await database;
+    final known = await db.query(
+      'remote_tracks',
+      columns: ['videoId'],
+      where: 'videoId = ?',
+      whereArgs: [videoId],
     );
+    if (known.isEmpty) return false;
+    final id = await db.insert(
+      'remote_play_history',
+      {
+        'videoId': videoId,
+        'playedAtLocal': playedAtLocal,
+        'playedAtUtc': playedAtUtc,
+        'playSeconds': playSeconds,
+      },
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+    return id > 0;
+  }
+
+  /// Historial remoto completo con la identidad por id de vídeo, para los
+  /// sincronizadores.
+  Future<List<Map<String, dynamic>>> getRemotePlayRowsForSync() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT videoId, playedAtLocal, playedAtUtc, playSeconds, syncedAt
+      FROM remote_play_history
+      ORDER BY playedAtLocal ASC
+    ''');
   }
 
   // --- PLAYLIST SONGS (JOIN) CRUD ---
@@ -1252,24 +1501,76 @@ class DatabaseHelper {
   /// exactamente el riesgo que CLAUDE.md nombra en "Cloud sync" ("a device
   /// with its storage unmounted... must never be able to wipe out data that
   /// lives only on another device").
-  Future<Map<String, List<Map<String, dynamic>>>> getLibraryIndexRows() async {
+  ///
+  /// [includeOnline] suma las playlists online (con `kind: 'online'`, que las
+  /// locales no llevan), sus pistas remotas y la pertenencia con orden. Es
+  /// opt-in: sin él el resultado es el de siempre (solo playlists locales).
+  Future<Map<String, List<Map<String, dynamic>>>> getLibraryIndexRows({bool includeOnline = false}) async {
     final db = await database;
     final songs = await db.rawQuery('''
       SELECT id AS songId, title, artist, album, duration AS durationSeconds,
              fileHash, hashKind, sourceUrl
       FROM songs
     ''');
-    final playlists = await db.rawQuery('''
+    final playlists = await db.rawQuery(includeOnline
+        ? '''
+      SELECT id AS playlistId, name, sortOrder, originalUrl, kind FROM playlists
+    '''
+        : '''
       SELECT id AS playlistId, name, sortOrder, originalUrl FROM playlists
+      WHERE kind = 'local'
     ''');
     final playlistSongs = await db.rawQuery('''
       SELECT playlistId, songId, orderIndex FROM playlist_songs
     ''');
+    if (!includeOnline) {
+      return {
+        'songs': songs,
+        'playlists': playlists,
+        'playlistSongs': playlistSongs,
+      };
+    }
+    // Las locales no llevan `kind`: el payload (y su hash) de quien no tiene
+    // playlists online queda idéntico al de antes.
+    final playlistRows = [
+      for (final row in playlists)
+        {
+          for (final entry in row.entries)
+            if (entry.key != 'kind') entry.key: entry.value,
+          if (row['kind'] == Playlist.kindOnline) 'kind': Playlist.kindOnline,
+        },
+    ];
+    // `artist` nunca null: el servidor lo declara texto (vacío = sin dato).
+    final remoteTracks = await db.rawQuery('''
+      SELECT videoId, title, COALESCE(artist, '') AS artist, album, durationSeconds,
+             thumbnailUrl, sourceUrl
+      FROM remote_tracks
+    ''');
+    final playlistRemoteTracks = await db.rawQuery('''
+      SELECT playlistId, videoId, orderIndex FROM playlist_remote_tracks
+    ''');
     return {
       'songs': songs,
-      'playlists': playlists,
+      'playlists': playlistRows,
       'playlistSongs': playlistSongs,
+      'remoteTracks': remoteTracks,
+      'playlistRemoteTracks': playlistRemoteTracks,
     };
+  }
+
+  /// Historial completo con la identidad del audio (`fileHash`) en vez del id
+  /// local, para la sincronización por carpeta: otro equipo lo mapea a su
+  /// propio id. Las filas de canciones sin hash no viajan.
+  Future<List<Map<String, dynamic>>> getHistoryRowsForFolderSync() async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT s.fileHash AS fileHash, ph.playDate AS playedAtLocal,
+             ph.playedAtUtc AS playedAtUtc, ph.playDuration AS playSeconds
+      FROM play_history ph
+      JOIN songs s ON s.id = ph.songId
+      WHERE s.fileHash IS NOT NULL AND s.fileHash != ''
+      ORDER BY ph.playDate ASC
+    ''');
   }
 
   /// Filas de historial sin subir todavía. `LEFT JOIN`, no `INNER JOIN`: una
@@ -1369,6 +1670,69 @@ class DatabaseHelper {
     return inserted;
   }
 
+  /// Escuchas remotas sin subir (`syncedAt` nulo), de la más vieja a la más
+  /// nueva. Pareja de [getUnsyncedPlays] para `remote_play_history`.
+  Future<List<Map<String, dynamic>>> getUnsyncedRemotePlays({int limit = 500}) async {
+    final db = await database;
+    return db.rawQuery('''
+      SELECT id, videoId, playedAtLocal, playedAtUtc, playSeconds
+      FROM remote_play_history
+      WHERE syncedAt IS NULL
+      ORDER BY playedAtLocal ASC
+      LIMIT ?
+    ''', [limit]);
+  }
+
+  Future<void> markRemotePlaysSynced(List<int> ids) async {
+    if (ids.isEmpty) return;
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    await db.rawUpdate(
+      'UPDATE remote_play_history SET syncedAt = ? WHERE id IN (${List.filled(ids.length, '?').join(',')})',
+      [now, ...ids],
+    );
+  }
+
+  /// Inserta historial remoto traído de la nube (`GET /history/remote`) y
+  /// devuelve cuántas filas entraron. Mismas reglas que [insertRestoredPlays]:
+  /// sólo `videoId` que existen en `remote_tracks` (hay clave foránea, así
+  /// que las demás harían fallar el lote), deduplicado por la clave natural
+  /// (`videoId` + hora local) y marcadas ya como sincronizadas. Pasar [known]
+  /// y [existingKeys] ya cargados evita releer las tablas por página.
+  Future<int> insertRestoredRemotePlays(
+    List<Map<String, dynamic>> rows, {
+    Set<String>? known,
+    Set<String>? existingKeys,
+  }) async {
+    if (rows.isEmpty) return 0;
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    known ??= await getRemoteTrackIds();
+    existingKeys ??= {
+      for (final r in await db.rawQuery('SELECT videoId, playedAtLocal FROM remote_play_history'))
+        '${r['videoId']} ${r['playedAtLocal']}',
+    };
+    var inserted = 0;
+    final batch = db.batch();
+    for (final row in rows) {
+      final videoId = row['videoId'] as String?;
+      final playedAtLocal = row['playedAtLocal'] as String?;
+      if (videoId == null || playedAtLocal == null) continue;
+      if (!known.contains(videoId)) continue;
+      if (!existingKeys.add('$videoId $playedAtLocal')) continue;
+      batch.insert('remote_play_history', {
+        'videoId': videoId,
+        'playedAtLocal': playedAtLocal,
+        'playedAtUtc': row['playedAtUtc'],
+        'playSeconds': (row['playSeconds'] as num?)?.toInt() ?? 0,
+        'syncedAt': now,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      inserted++;
+    }
+    if (inserted > 0) await batch.commit(noResult: true);
+    return inserted;
+  }
+
   /// Ids de canciones locales y claves naturales del historial, para pasarlos
   /// a [insertRestoredPlays] una sola vez por pasada de varias páginas.
   Future<({Set<String> knownSongs, Set<String> existingKeys})> loadRestoreContext() async {
@@ -1389,6 +1753,7 @@ class DatabaseHelper {
   Future<void> resetHistorySyncMarkers() async {
     final db = await database;
     await db.rawUpdate('UPDATE play_history SET syncedAt = NULL');
+    await db.rawUpdate('UPDATE remote_play_history SET syncedAt = NULL');
   }
 
   /// Día 1 del mes en curso a las 00:00 en hora local: el "mes" de las
@@ -1407,11 +1772,18 @@ class DatabaseHelper {
     return monday.toIso8601String();
   }
 
-  Future<List<Map<String, dynamic>>> getTopSongsThisWeek({int limit = 10}) async {
+  Future<List<Map<String, dynamic>>> getTopSongsThisWeek({int limit = 10}) =>
+      _topSongsSince(_getStartOfWeek(), limit);
+
+  Future<List<Map<String, dynamic>>> getTopSongsThisMonth({int limit = 10}) =>
+      _topSongsSince(_getStartOfMonth(), limit);
+
+  /// Canciones locales y pistas remotas guardadas en una sola lista. El id
+  /// de las remotas es `yt:<videoId>` y su `artPath` va vacío: ningún
+  /// consumidor puede asumir que el id existe en `songs`.
+  Future<List<Map<String, dynamic>>> _topSongsSince(String since, int limit) async {
     final db = await database;
-    final startOfWeek = _getStartOfWeek();
-    
-    final result = await db.rawQuery('''
+    final local = await db.rawQuery('''
       SELECT s.id, s.title, s.artist, s.artPath, COUNT(*) as playCount
       FROM play_history ph
       JOIN songs s ON s.id = ph.songId
@@ -1419,77 +1791,43 @@ class DatabaseHelper {
       GROUP BY s.id
       ORDER BY playCount DESC
       LIMIT ?
-    ''', [startOfWeek, limit]);
-    
-    return result;
-  }
-
-  Future<List<Map<String, dynamic>>> getTopSongsThisMonth({int limit = 10}) async {
-    final db = await database;
-    final oneMonthAgo = _getStartOfMonth();
-    
-    final result = await db.rawQuery('''
-      SELECT s.id, s.title, s.artist, s.artPath, COUNT(*) as playCount
-      FROM play_history ph
-      JOIN songs s ON s.id = ph.songId
-      WHERE ph.playDate >= ?
-      GROUP BY s.id
+    ''', [since, limit]);
+    final remote = await db.rawQuery('''
+      SELECT 'yt:' || rt.videoId AS id, rt.title AS title, COALESCE(rt.artist, '') AS artist,
+             '' AS artPath, COUNT(*) as playCount
+      FROM remote_play_history rph
+      JOIN remote_tracks rt ON rt.videoId = rph.videoId
+      WHERE rph.playedAtLocal >= ?
+      GROUP BY rt.videoId
       ORDER BY playCount DESC
       LIMIT ?
-    ''', [oneMonthAgo, limit]);
-    
-    return result;
+    ''', [since, limit]);
+    return mergeTopSongRows(local, remote, limit: limit);
   }
 
-  Future<int> getTotalPlaysThisWeek() async {
+  Future<int> getTotalPlaysThisWeek() => _totalPlaysSince(_getStartOfWeek());
+
+  Future<int> getTotalPlaysThisMonth() => _totalPlaysSince(_getStartOfMonth());
+
+  Future<int> _totalPlaysSince(String since) async {
     final db = await database;
-    final startOfWeek = _getStartOfWeek();
-    
     final result = await db.rawQuery('''
-      SELECT COUNT(*) as total
-      FROM play_history
-      WHERE playDate >= ?
-    ''', [startOfWeek]);
-    
+      SELECT (SELECT COUNT(*) FROM play_history WHERE playDate >= ?)
+           + (SELECT COUNT(*) FROM remote_play_history WHERE playedAtLocal >= ?) as total
+    ''', [since, since]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
-  Future<int> getTotalPlaysThisMonth() async {
+  Future<int> getTotalListenTimeThisWeek() => _listenTimeSince(_getStartOfWeek());
+
+  Future<int> getTotalListenTimeThisMonth() => _listenTimeSince(_getStartOfMonth());
+
+  Future<int> _listenTimeSince(String since) async {
     final db = await database;
-    final oneMonthAgo = _getStartOfMonth();
-    
     final result = await db.rawQuery('''
-      SELECT COUNT(*) as total
-      FROM play_history
-      WHERE playDate >= ?
-    ''', [oneMonthAgo]);
-    
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
-
-  Future<int> getTotalListenTimeThisWeek() async {
-    final db = await database;
-    final startOfWeek = _getStartOfWeek();
-
-    final result = await db.rawQuery('''
-      SELECT COALESCE(SUM(playDuration), 0) as total
-      FROM play_history
-      WHERE playDate >= ?
-    ''', [startOfWeek]);
-
-    return Sqflite.firstIntValue(result) ?? 0;
-  }
-
-  Future<int> getTotalListenTimeThisMonth() async {
-    final db = await database;
-    final oneMonthAgo = _getStartOfMonth();
-
-    final result = await db.rawQuery('''
-      SELECT COALESCE(SUM(playDuration), 0) as total
-      FROM play_history
-      WHERE playDate >= ?
-    ''', [oneMonthAgo]);
-
+      SELECT (SELECT COALESCE(SUM(playDuration), 0) FROM play_history WHERE playDate >= ?)
+           + (SELECT COALESCE(SUM(playSeconds), 0) FROM remote_play_history WHERE playedAtLocal >= ?) as total
+    ''', [since, since]);
     return Sqflite.firstIntValue(result) ?? 0;
   }
 
@@ -1498,33 +1836,31 @@ class DatabaseHelper {
   /// son grupos distintos aquí. El plegado insensible a mayúsculas/espacios
   /// (igual que `compute_artist_key` en el servidor, para que las
   /// estadísticas propias y las de un amigo coincidan) lo hace
-  /// `foldTopArtists` en `statistics_service.dart`, sobre TODAS las filas.
-  Future<List<Map<String, dynamic>>> getTopArtistsThisWeek() async {
+  /// `foldTopArtists` en `statistics_service.dart`, sobre TODAS las filas
+  /// (locales y remotas juntas).
+  Future<List<Map<String, dynamic>>> getTopArtistsThisWeek() => _topArtistsSince(_getStartOfWeek());
+
+  Future<List<Map<String, dynamic>>> getTopArtistsThisMonth() => _topArtistsSince(_getStartOfMonth());
+
+  Future<List<Map<String, dynamic>>> _topArtistsSince(String since) async {
     final db = await database;
-    final startOfWeek = _getStartOfWeek();
-
     return await db.rawQuery('''
-      SELECT s.artist, COUNT(*) as playCount
-      FROM play_history ph
-      JOIN songs s ON s.id = ph.songId
-      WHERE ph.playDate >= ?
-      GROUP BY s.artist
+      SELECT artist, SUM(playCount) as playCount FROM (
+        SELECT s.artist AS artist, COUNT(*) as playCount
+        FROM play_history ph
+        JOIN songs s ON s.id = ph.songId
+        WHERE ph.playDate >= ?
+        GROUP BY s.artist
+        UNION ALL
+        SELECT rt.artist AS artist, COUNT(*) as playCount
+        FROM remote_play_history rph
+        JOIN remote_tracks rt ON rt.videoId = rph.videoId
+        WHERE rph.playedAtLocal >= ? AND rt.artist IS NOT NULL
+        GROUP BY rt.artist
+      )
+      GROUP BY artist
       ORDER BY playCount DESC
-    ''', [startOfWeek]);
-  }
-
-  Future<List<Map<String, dynamic>>> getTopArtistsThisMonth() async {
-    final db = await database;
-    final oneMonthAgo = _getStartOfMonth();
-
-    return await db.rawQuery('''
-      SELECT s.artist, COUNT(*) as playCount
-      FROM play_history ph
-      JOIN songs s ON s.id = ph.songId
-      WHERE ph.playDate >= ?
-      GROUP BY s.artist
-      ORDER BY playCount DESC
-    ''', [oneMonthAgo]);
+    ''', [since, since]);
   }
 
   // Delete all songs belonging to a playlist (files + DB rows).

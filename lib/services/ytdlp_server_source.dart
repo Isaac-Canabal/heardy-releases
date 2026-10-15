@@ -206,6 +206,13 @@ class YtdlpServerSource implements DownloadSource {
       case 401:
       case 403:
         throw DownloadSourceException(DownloadSourceErrorKind.unauthorized, detail, statusCode: statusCode, reason: reason);
+      case 410:
+        throw DownloadSourceException(
+          DownloadSourceErrorKind.serviceUnavailable,
+          detail,
+          statusCode: statusCode,
+          reason: reason,
+        );
       case 451:
         throw DownloadSourceException(DownloadSourceErrorKind.blockedLegal, detail, statusCode: statusCode, reason: reason);
       case 415:

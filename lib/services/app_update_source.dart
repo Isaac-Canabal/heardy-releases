@@ -26,6 +26,19 @@ class AppUpdateInfo {
       );
 }
 
+/// El cuerpo de un release de GitHub llega como Markdown; la tarjeta de
+/// notificaciones lo pinta como texto plano: se quitan encabezados, énfasis y
+/// comillas invertidas, y las viñetas pasan a «•». No recorta líneas.
+String releaseNotesToPlainText(String markdown) {
+  final lines = markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+  return lines.map((raw) {
+    var line = raw.trimRight();
+    line = line.replaceFirst(RegExp(r'^\s{0,3}#{1,6}\s+'), '');
+    line = line.replaceFirstMapped(RegExp(r'^(\s*)[-*+]\s+'), (m) => '${m[1]}• ');
+    return line.replaceAll('`', '').replaceAll('**', '').replaceAll('__', '');
+  }).join('\n').trim();
+}
+
 /// Único punto donde este apartado sabe que "el repositorio" vive en GitHub
 /// — igual que `DownloadSource`/`CloudSource`, la app nunca habla con el
 /// proveedor externo directamente desde una pantalla.

@@ -12,7 +12,7 @@
 ; cambiarlo nunca: es lo que permite que una instalación futura se detecte
 ; como una actualización en vez de una instalación paralela.
 #define MyAppName "Heardy"
-#define MyAppVersion "1.1.10"
+#define MyAppVersion "1.2.0"
 #define MyAppExeName "heardy.exe"
 #define MyReleaseDir "..\..\build\windows\x64\runner\Release"
 
@@ -80,6 +80,16 @@ Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: 
 Name: "{group}\Desinstalar {#MyAppName}"; Filename: "{uninstallexe}"
 
 [Run]
+; Sincronizacion por Wi-Fi: reglas de entrada solo para este programa y solo en
+; el perfil privado (nunca publico ni de dominio) y solo desde la subred local
+; (remoteip=localsubnet). TCP 53418 = canal cifrado, UDP 53419 = anuncio de
+; dispositivos cercanos. Se borran (por nombre Y programa, para no tocar reglas
+; ajenas) antes de crearlas para que reinstalar no las duplique. Sin el instalador, Windows muestra su aviso
+; normal del firewall la primera vez que la pantalla abre el puerto.
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Heardy LAN sync TCP"" program=""{app}\{#MyAppExeName}"""; Flags: runhidden; StatusMsg: "Configurando el firewall..."
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Heardy LAN sync UDP"" program=""{app}\{#MyAppExeName}"""; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Heardy LAN sync TCP"" dir=in action=allow protocol=TCP localport=53418 remoteip=localsubnet program=""{app}\{#MyAppExeName}"" profile=private"; Flags: runhidden
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall add rule name=""Heardy LAN sync UDP"" dir=in action=allow protocol=UDP localport=53419 remoteip=localsubnet program=""{app}\{#MyAppExeName}"" profile=private"; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "Abrir {#MyAppName}"; Flags: nowait postinstall skipifsilent
 
 ; El desinstalador no pasa por Restart Manager (eso es sólo CloseApplications,
@@ -87,6 +97,8 @@ Filename: "{app}\{#MyAppExeName}"; Description: "Abrir {#MyAppName}"; Flags: now
 ; uso y sobrevivían en disco. Cerrarla antes de borrar.
 [UninstallRun]
 Filename: "{sys}\taskkill.exe"; Parameters: "/IM {#MyAppExeName} /F"; Flags: runhidden; RunOnceId: "CloseHeardy"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Heardy LAN sync TCP"" program=""{app}\{#MyAppExeName}"""; Flags: runhidden; RunOnceId: "DelFwTcp"
+Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=""Heardy LAN sync UDP"" program=""{app}\{#MyAppExeName}"""; Flags: runhidden; RunOnceId: "DelFwUdp"
 
 ; yt-dlp.exe viaja en {app}\yt-dlp (el install de CMake lo deja en la carpeta
 ; Release, así que ya entra en [Files]). La app mantiene una copia actualizable

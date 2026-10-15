@@ -164,6 +164,9 @@ String _formatWait(int seconds) {
   return minutes == 1 ? '1 minuto' : '$minutes minutos';
 }
 
+const _downloadsMovedMessage =
+    'Esta versión de Heardy ya no descarga desde el servidor. Actualiza la aplicación para seguir descargando.';
+
 String downloadErrorMessage(
   DownloadSourceErrorKind kind, {
   String serverText = '',
@@ -179,9 +182,7 @@ String downloadErrorMessage(
           ? 'Elige primero una carpeta para tu biblioteca en Ajustes.'
           : 'Configura la dirección del servidor de descargas en Ajustes.';
     case DownloadSourceErrorKind.network:
-      return 'No se pudo contactar con el servidor de descargas. Revisa tu conexión a internet; '
-          'si el servidor llevaba un rato inactivo, puede tardar un minuto en arrancar. '
-          'Se reintentará solo.';
+      return 'No se pudo conectar. Revisa tu conexión a internet. Se reintentará solo.';
     case DownloadSourceErrorKind.unauthorized:
       return 'Tu sesión no es válida o ha caducado. Cierra sesión, vuelve a iniciarla e inténtalo de nuevo.';
     case DownloadSourceErrorKind.badRequest:
@@ -203,19 +204,19 @@ String downloadErrorMessage(
     case DownloadSourceErrorKind.dailyQuotaExceeded:
       return safeServerText(serverText) ?? 'Has llegado a tu cupo de descargas. Vuelve más tarde.';
     case DownloadSourceErrorKind.antiBotBlocked:
-      // Sin cifra exacta: 20-40 min es lo único medido de verdad.
-      return 'YouTube bloqueó temporalmente al servidor. Puede tardar entre 20 y 40 minutos; se reintentará solo.';
+      return 'YouTube limitó temporalmente las descargas desde este dispositivo. Se reintentará solo más tarde.';
     case DownloadSourceErrorKind.serviceUnavailable:
       if (reason == 'auth_unavailable') {
         return 'No se pudo comprobar tu sesión ahora mismo. Se reintentará en unos segundos.';
       }
+      if (reason == 'downloads_moved_to_device') return _downloadsMovedMessage;
       if (reason == 'not_configured') return 'El servidor todavía no está listo. Inténtalo de nuevo más tarde.';
       return 'El servicio no está disponible ahora mismo. Inténtalo en unos minutos.';
     case DownloadSourceErrorKind.serverCapacityExhausted:
       return safeServerText(serverText) ??
           'Los servidores han agotado su capacidad de este mes. Vuelve a intentarlo más adelante.';
     case DownloadSourceErrorKind.songTooLong:
-      return 'Esta canción es demasiado larga para descargarla desde el servidor.';
+      return 'Esta canción es demasiado larga para descargarla.';
     case DownloadSourceErrorKind.blockedLegal:
       return 'Este contenido no está disponible por una reclamación de derechos de autor.';
     case DownloadSourceErrorKind.cancelled:
@@ -557,6 +558,7 @@ String localizedDownloadMessage(
 String _unavailableMessage(AppLocalizations l10n, String? reason) => switch (reason) {
       'auth_unavailable' => l10n.errorAuthUnavailable,
       'not_configured' => l10n.errorServerNotReady,
+      'downloads_moved_to_device' => l10n.errorDownloadsMoved,
       _ => l10n.errorServiceUnavailable,
     };
 

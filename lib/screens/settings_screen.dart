@@ -6,19 +6,21 @@ import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/support_links.dart';
 import '../providers/auth_provider.dart';
+import '../providers/folder_sync_provider.dart';
 import '../providers/music_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/sync_provider.dart';
 import '../screens/auth/login_screen.dart';
 import '../screens/friends_screen.dart';
+import '../screens/lan_sync_screen.dart';
 import '../screens/legal_screen.dart';
 import '../screens/sync_status_screen.dart';
 import '../screens/cloud_library_screen.dart';
 import '../services/audio_effects_service.dart';
 import '../services/audio_player_handler.dart';
 import '../services/database_helper.dart';
+import '../services/library_storage.dart' show LibraryEntry;
 import '../theme/app_theme.dart';
-import '../services/download_source.dart';
 import '../services/storage_service.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
@@ -138,6 +140,14 @@ class SettingsScreen extends StatelessWidget {
           _SectionTitle(l10n.settingsAccountSectionTitle),
           const SizedBox(height: 10),
           const _AccountSection(),
+          const SizedBox(height: 28),
+          _SectionTitle(l10n.folderSyncSectionTitle),
+          const SizedBox(height: 10),
+          const _FolderSyncSection(),
+          const SizedBox(height: 28),
+          _SectionTitle(l10n.lanSyncSectionTitle),
+          const SizedBox(height: 10),
+          const LanSyncSettingsSection(),
           const SizedBox(height: 28),
           const _StatisticsSection(),
           const SizedBox(height: 28),
@@ -463,10 +473,6 @@ class SettingsScreen extends StatelessWidget {
           _SectionTitle(l10n.settingsSectionAudio),
           const SizedBox(height: 10),
           const _AudioEffectsSection(),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.serverSectionTitle),
-          const SizedBox(height: 10),
-          const _DownloadServerSection(),
           const SizedBox(height: 28),
           _SectionTitle(l10n.settingsSectionSearch),
           const SizedBox(height: 10),
@@ -889,6 +895,123 @@ class _ShareStatsSheetState extends State<_ShareStatsSheet> {
 /// Ajustes que necesita saber que existe [HeardyAuthProvider]. Sin sesión, sólo
 /// invita a iniciarla — no bloquea nada acá, la biblioteca local no la
 /// necesita para nada.
+class _FolderSyncSection extends StatefulWidget {
+  const _FolderSyncSection();
+
+  @override
+  State<_FolderSyncSection> createState() => _FolderSyncSectionState();
+}
+
+class _FolderSyncSectionState extends State<_FolderSyncSection> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<FolderSyncProvider>().refresh();
+    });
+  }
+
+  Future<void> _restore() async {
+    final l10n = AppLocalizations.of(context)!;
+    final provider = context.read<FolderSyncProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    final chosen = await showDialog<LibraryEntry>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.folderSyncRestoreTitle),
+        content: provider.backups.isEmpty
+            ? Text(l10n.folderSyncNoBackups)
+            : SizedBox(
+                width: 320,
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(l10n.folderSyncRestoreBody),
+                    ),
+                    for (final backup in provider.backups)
+                      ListTile(
+                        dense: true,
+                        title: Text(backup.name),
+                        onTap: () => Navigator.pop(ctx, backup),
+                      ),
+                  ],
+                ),
+              ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: Text(l10n.commonCancel))],
+      ),
+    );
+    if (chosen == null) return;
+    await provider.restoreBackup(chosen);
+    messenger.showSnackBar(SnackBar(
+      content: Text(provider.outcome == FolderSyncOutcome.ok ? l10n.folderSyncRestored : l10n.folderSyncFailed),
+    ));
+  }
+
+  String? _status(AppLocalizations l10n, FolderSyncProvider sync) {
+    if (sync.isBusy) return l10n.folderSyncInProgress;
+    switch (sync.outcome) {
+      case FolderSyncOutcome.noLibraryFolder:
+        return l10n.folderSyncNoFolder;
+      case FolderSyncOutcome.failed:
+        return l10n.folderSyncFailed;
+      case FolderSyncOutcome.ok:
+        final r = sync.lastReport;
+        if (r != null) return l10n.folderSyncDone(r.playlistsAdded, r.historyAdded);
+      case FolderSyncOutcome.none:
+        break;
+    }
+    final at = sync.lastSyncAt;
+    return at == null ? null : l10n.folderSyncLast(MaterialLocalizations.of(context).formatShortDate(at));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final sync = context.watch<FolderSyncProvider>();
+    final status = _status(l10n, sync);
+    return Container(
+      decoration: AppTheme.glassCard(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(l10n.folderSyncBody, style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: sync.isBusy ? null : () => context.read<FolderSyncProvider>().syncNow(),
+                  icon: const Icon(Icons.folder_copy_outlined, size: 18),
+                  label: Text(l10n.folderSyncButton),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: sync.isBusy ? null : _restore,
+                child: Text(l10n.folderSyncRestoreButton),
+              ),
+            ],
+          ),
+          if (status != null) ...[
+            const SizedBox(height: 8),
+            Text(status, style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12)),
+          ],
+          if (sync.otherDeviceSongs.isNotEmpty)
+            TextButton(
+              style: TextButton.styleFrom(alignment: Alignment.centerLeft, foregroundColor: Colors.white),
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const CloudLibraryScreen())),
+              child: Text(l10n.folderSyncOtherSongs(sync.otherDeviceSongs.length)),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _AccountSection extends StatelessWidget {
   const _AccountSection();
 
@@ -1132,9 +1255,9 @@ class _AccountSection extends StatelessWidget {
 /// proveedor de PO tokens* (llega, pero las descargas van a fallar igual).
 /// Cada uno se arregla en un sitio distinto, y un "error" genérico no diría
 /// en cuál.
-/// Estabilizar audio y ecualizador se aplican en el propio [AudioEffectsService]
-/// (Android vía los efectos oficiales de `just_audio`, escritorio vía `af` de
-/// mpv) — esta sección sólo lee/escribe sus toggles y preset, sin saber nada
+/// Estabilizar audio se aplica en el propio [AudioEffectsService]
+/// (Android con un efecto de sistema, escritorio con una ganancia por pista
+/// vía mpv) — esta sección sólo lee/escribe su toggle, sin saber nada
 /// de la plataforma debajo.
 class _AudioEffectsSection extends StatelessWidget {
   const _AudioEffectsSection();
@@ -1152,26 +1275,7 @@ class _AudioEffectsSection extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SwitchListTile(
-            key: const Key('normalize_volume_switch'),
-            contentPadding: EdgeInsets.zero,
-            activeThumbColor: AppTheme.primaryLight,
-            value: settings.normalizeVolume,
-            title: Text(
-              l10n.settingsNormalizeVolume,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-            ),
-            subtitle: Text(
-              l10n.settingsNormalizeVolumeBody,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
-            ),
-            onChanged: (v) {
-              settings.setNormalizeVolume(v);
-              handler.setNormalizeVolume(v);
-            },
-          ),
           if (handler.supportsSkipSilence) ...[
-            const Divider(height: 24, color: Colors.white12),
             SwitchListTile(
               key: const Key('skip_silence_switch'),
               contentPadding: EdgeInsets.zero,
@@ -1190,8 +1294,8 @@ class _AudioEffectsSection extends StatelessWidget {
                 handler.setSkipSilence(v);
               },
             ),
+            const Divider(height: 24, color: Colors.white12),
           ],
-          const Divider(height: 24, color: Colors.white12),
           SwitchListTile(
             key: const Key('track_fade_switch'),
             contentPadding: EdgeInsets.zero,
@@ -1222,233 +1326,6 @@ class _AudioEffectsSection extends StatelessWidget {
             ),
             onChanged: (enabled) => fx.setStabilizeEnabled(enabled),
           ),
-          const Divider(height: 24, color: Colors.white12),
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            activeThumbColor: AppTheme.primaryLight,
-            value: fx.equalizerEnabled,
-            title: Text(l10n.audioFxEqualizerTitle, style: const TextStyle(color: Colors.white, fontSize: 13)),
-            subtitle: Text(
-              l10n.audioFxEqualizerBody,
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
-            ),
-            onChanged: (enabled) => fx.setEqualizerEnabled(enabled),
-          ),
-          if (fx.equalizerEnabled) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _EqPresetChip(
-                  label: l10n.audioFxPresetFlat,
-                  preset: EqualizerPreset.flat,
-                  selected: fx.preset,
-                  onSelected: fx.setPreset,
-                ),
-                _EqPresetChip(
-                  label: l10n.audioFxPresetVocalBoost,
-                  preset: EqualizerPreset.vocalBoost,
-                  selected: fx.preset,
-                  onSelected: fx.setPreset,
-                ),
-                _EqPresetChip(
-                  label: l10n.audioFxPresetTrebleFocus,
-                  preset: EqualizerPreset.trebleFocus,
-                  selected: fx.preset,
-                  onSelected: fx.setPreset,
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _EqPresetChip extends StatelessWidget {
-  final String label;
-  final EqualizerPreset preset;
-  final EqualizerPreset selected;
-  final ValueChanged<EqualizerPreset> onSelected;
-
-  const _EqPresetChip({
-    required this.label,
-    required this.preset,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isSelected = preset == selected;
-    return ChoiceChip(
-      label: Text(label),
-      selected: isSelected,
-      onSelected: (_) => onSelected(preset),
-      selectedColor: AppTheme.primary.withValues(alpha: 0.3),
-      backgroundColor: Colors.white.withValues(alpha: 0.06),
-      labelStyle: TextStyle(color: Colors.white.withValues(alpha: isSelected ? 1 : 0.7), fontSize: 12),
-      side: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
-    );
-  }
-}
-
-class _DownloadServerSection extends StatefulWidget {
-  const _DownloadServerSection();
-
-  @override
-  State<_DownloadServerSection> createState() => _DownloadServerSectionState();
-}
-
-class _DownloadServerSectionState extends State<_DownloadServerSection> {
-  bool _testing = false;
-  DownloadSourceStatus? _lastStatus;
-
-  Future<void> _test() async {
-    setState(() {
-      _testing = true;
-      _lastStatus = null;
-    });
-
-    // El `DownloadSource` del árbol de Providers, no uno nuevo: así lo que se
-    // prueba es exactamente la fuente que usan las descargas reales, y no una
-    // copia que podría estar configurada de otra forma.
-    final source = context.read<DownloadSource>();
-    try {
-      final status = await source.probe();
-      if (!mounted) return;
-      setState(() => _lastStatus = status);
-    } finally {
-      // Un único finally, no un reset por cada salida: la convención existe
-      // porque una ruta de salida sin probar dejaba la UI bloqueada.
-      if (mounted) setState(() => _testing = false);
-    }
-  }
-
-  String _problemText(DownloadSourceStatus status) {
-    final l10n = AppLocalizations.of(context)!;
-    return switch (status.problem) {
-      DownloadProbeProblem.noServer => l10n.probeNoServer,
-      DownloadProbeProblem.unreachable => l10n.probeUnreachable,
-      DownloadProbeProblem.timeout => l10n.probeTimeout,
-      DownloadProbeProblem.capacity => l10n.dlCapacity,
-      DownloadProbeProblem.serviceDown =>
-        '${l10n.errorServiceUnavailable}\n${l10n.errorCodeLine(downloadErrorCode(DownloadSourceErrorKind.extraction, statusCode: status.statusCode))}',
-      DownloadProbeProblem.keyInvalid => l10n.probeKeyInvalid,
-      DownloadProbeProblem.potDown => l10n.probePotDown,
-      null => status.detail,
-    };
-  }
-
-  ({Color color, IconData icon, String text})? _statusLine() {
-    final status = _lastStatus;
-    if (status == null) return null;
-    if (!status.reachable) {
-      return (
-        color: Colors.redAccent,
-        icon: Icons.cloud_off_rounded,
-        text: _problemText(status),
-      );
-    }
-    if (!status.authenticated) {
-      return (
-        color: Colors.orangeAccent,
-        icon: Icons.key_off_rounded,
-        text: _problemText(status),
-      );
-    }
-    if (!status.potProviderReachable) {
-      return (
-        color: Colors.orangeAccent,
-        icon: Icons.warning_amber_rounded,
-        text: _problemText(status),
-      );
-    }
-    return (
-      color: Colors.greenAccent,
-      icon: Icons.cloud_done_rounded,
-      text: AppLocalizations.of(context)!.serverConnectedStatus(status.version ?? '?'),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final line = _statusLine();
-
-    return Container(
-      decoration: AppTheme.glassCard(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.dns_rounded, color: AppTheme.primaryLight, size: 20),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  l10n.serverIntroBody,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.45),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-              icon: _testing
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Icon(Icons.wifi_tethering_rounded, size: 18),
-              label: Text(
-                _testing ? l10n.serverTestingButton : l10n.serverTestButton,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              onPressed: _testing ? null : _test,
-            ),
-          ),
-          if (line != null) ...[
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(line.icon, color: line.color, size: 16),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    line.text,
-                    style: TextStyle(
-                      color: line.color,
-                      fontSize: 12,
-                      height: 1.35,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
         ],
       ),
     );

@@ -8,6 +8,7 @@ import '../services/database_helper.dart';
 import '../services/download_source.dart';
 import '../services/explore_logic.dart';
 import '../services/friendly_error.dart';
+import '../services/import_destination_logic.dart';
 import '../services/stream_resolver.dart';
 import '../theme/app_theme.dart';
 import '../widgets/mini_player.dart';
@@ -89,29 +90,32 @@ class _ExploreCollectionScreenState extends State<ExploreCollectionScreen>
     if (collection == null || _downloadingAll) return;
     final l10n = AppLocalizations.of(context)!;
     final messenger = ScaffoldMessenger.of(context);
-    final pending = tracksToDownload(collection.tracks, _localIds);
-    if (pending.isEmpty) {
-      messenger.showSnackBar(SnackBar(
-        content: Text(l10n.exploreDownloadAllNothing),
-        behavior: SnackBarBehavior.floating,
-      ));
-      return;
-    }
     setState(() => _downloadingAll = true);
     try {
-      final choice = await pickTargetPlaylist(
+      final destination = await pickPlaylistDestination(
         context,
         suggestedName: collection.title.isNotEmpty ? collection.title : widget.title,
       );
-      if (choice == null || !mounted) return;
-      final playlistId = await resolveTargetPlaylistId(context, choice);
-      if (playlistId == null || !mounted) return;
+      if (destination == null || !mounted) return;
 
+      if (destinationActionForKind(destination.kind) == DestinationAction.saveReferences) {
+        await saveRemoteTracksToOnlinePlaylist(context, destination, collection.tracks);
+        return;
+      }
+
+      final pending = tracksToDownload(collection.tracks, _localIds);
+      if (pending.isEmpty) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(l10n.exploreDownloadAllNothing),
+          behavior: SnackBarBehavior.floating,
+        ));
+        return;
+      }
       final provider = context.read<DownloadProvider>();
       var added = 0;
       for (final track in pending) {
         // Listado aplanado: el worker lo re-resuelve antes de bajar (DD6).
-        if (await provider.enqueueTrack(track, playlistId: playlistId, metadataComplete: false)) added++;
+        if (await provider.enqueueTrack(track, playlistId: destination.id, metadataComplete: false)) added++;
       }
       provider.processQueue();
       if (!mounted) return;

@@ -21,6 +21,7 @@ import 'services/audio_effects_service.dart';
 import 'services/audio_player_handler.dart';
 import 'services/cloud_source.dart';
 import 'services/download_service.dart';
+import 'services/device_download_source.dart';
 import 'services/download_source.dart';
 import 'models/explore.dart' show deviceExploreCountry;
 import 'services/explore_logic.dart';
@@ -28,6 +29,7 @@ import 'services/heardy_cloud_source.dart';
 import 'services/official_server.dart';
 import 'services/server_pool.dart';
 import 'services/stream_resolver.dart';
+import 'services/ytdlp_local_client.dart';
 import 'services/ytdlp_local_stream_resolver.dart';
 import 'services/ytdlp_server_source.dart';
 import 'services/system_notifications.dart';
@@ -38,6 +40,10 @@ import 'providers/explore_provider.dart';
 import 'providers/music_provider.dart';
 import 'providers/notifications_provider.dart';
 import 'providers/settings_provider.dart';
+import 'providers/folder_sync_provider.dart';
+import 'providers/lan_sync_provider.dart';
+import 'services/folder_sync_service.dart';
+import 'services/library_storage.dart';
 import 'providers/sync_provider.dart';
 import 'screens/legal_screen.dart';
 import 'screens/main_shell_screen.dart';
@@ -258,17 +264,31 @@ void main() async {
   final authProvider =
       Platform.isAndroid ? HeardyAuthProvider() : HeardyAuthProvider.rest();
 
-  // La fuente lee la configuración por closures, no por copia: cambiar la
-  // dirección en Ajustes (o iniciar/cerrar sesión) tiene efecto inmediato,
-  // sin reconstruir nada ni reiniciar la app. `authToken` reemplaza la clave
-  // de API fija de antes (Fase 2 del plan de seguridad, cierra A1): sin
-  // sesión, devuelve null y la llamada sale sin autenticar.
+  // Descargar, buscar y resolver corren en el dispositivo (NewPipeExtractor en
+  // Android, yt-dlp.exe en Windows): sin sesión, sin cupo y sin servidor. La
+  // fuente del servidor queda sólo para Explorar, que `DeviceDownloadSource`
+  // le delega. Lee la configuración por closures, no por copia: iniciar o
+  // cerrar sesión tiene efecto inmediato.
   final serverPool = ServerPool(OfficialServer.urls);
-  final DownloadSource downloadSource = YtdlpServerSource(
+  final serverSource = YtdlpServerSource(
     baseUrl: () => settingsProvider.downloadServerUrl,
     authToken: () => authProvider.idToken(),
     pool: serverPool,
   );
+  String? ytdlpPath;
+  if (Platform.isWindows) {
+    ytdlpPath = await prepareWindowsYtdlp();
+    configureWindowsStreaming(ytdlpPath);
+    // -U compite por CPU/red con la primera resolución: se pospone.
+    final path = ytdlpPath;
+    if (path != null) {
+      unawaited(Future<void>.delayed(const Duration(minutes: 3), () => maybeUpdateYtdlp(path)));
+    }
+  }
+  final DeviceBackend deviceBackend = Platform.isAndroid
+      ? AndroidDeviceBackend()
+      : (ytdlpPath != null ? WindowsDeviceBackend(YtdlpLocalClient(ytdlpPath)) : const UnavailableDeviceBackend());
+  final DownloadSource downloadSource = DeviceDownloadSource(backend: deviceBackend, explore: serverSource);
   final downloadProvider = DownloadProvider(
     service: DownloadService(source: downloadSource),
     source: downloadSource,
@@ -299,24 +319,48 @@ void main() async {
     shareNowPlayingEnabled: () => settingsProvider.shareNowPlaying,
   );
   syncProvider.attachPlayback(audioHandler);
+  // Las playlists online que una sincronización trae de la nube aparecen sin
+  // reiniciar la app.
+  bindOnlinePlaylistsRefresh(syncProvider, () async {
+    await musicProvider.loadPlaylists();
+    musicProvider.notifyLibraryChanged();
+  });
+  final folderSyncProvider = FolderSyncProvider(
+    libraryRoot: () => musicProvider.libraryRootUri,
+    onImported: () async {
+      await musicProvider.loadPlaylists();
+      await musicProvider.refreshInboxCount();
+      musicProvider.notifyLibraryChanged();
+    },
+  );
+  final lanSyncProvider = LanSyncProvider(
+    folderService: (deviceId, label) => FolderSyncService(
+      storage: defaultLibraryStorage(),
+      deviceId: deviceId,
+      deviceLabel: label,
+    ),
+    onImported: () async {
+      await musicProvider.loadPlaylists();
+      await musicProvider.refreshInboxCount();
+      musicProvider.notifyLibraryChanged();
+    },
+  );
   final notificationsProvider = NotificationsProvider(
     cloudSource: cloudSource,
     language: () => settingsProvider.language,
   );
-  final audioEffectsService = AudioEffectsService(audioHandler);
+  final audioEffectsService = AudioEffectsService(
+    androidSessionIds: audioHandler.player.androidAudioSessionIdStream,
+    trackPaths: audioHandler.mediaItem.map((item) {
+      if (item == null || item.extras?['isStream'] == true) return null;
+      final path = item.extras?['filePath'] as String?;
+      return (path == null || path.isEmpty) ? null : path;
+    }).distinct(),
+  );
 
-  final StreamResolver streamResolver;
-  if (Platform.isWindows) {
-    final ytdlpPath = await prepareWindowsYtdlp();
-    configureWindowsStreaming(ytdlpPath);
-    // -U compite por CPU/red con la primera resolución: se pospone.
-    if (ytdlpPath != null) {
-      unawaited(Future<void>.delayed(const Duration(minutes: 3), () => maybeUpdateYtdlp(ytdlpPath)));
-    }
-    streamResolver = CachingStreamResolver(WindowsYtdlpStreamResolver(ytdlpPath ?? ''));
-  } else {
-    streamResolver = defaultStreamResolver();
-  }
+  final StreamResolver streamResolver = Platform.isWindows
+      ? CachingStreamResolver(WindowsYtdlpStreamResolver(ytdlpPath ?? ''))
+      : defaultStreamResolver();
 
   runApp(
     MultiProvider(
@@ -331,6 +375,8 @@ void main() async {
         ChangeNotifierProvider.value(value: musicProvider),
         ChangeNotifierProvider.value(value: downloadProvider),
         ChangeNotifierProvider.value(value: syncProvider),
+        ChangeNotifierProvider.value(value: folderSyncProvider),
+        ChangeNotifierProvider.value(value: lanSyncProvider),
         ChangeNotifierProvider.value(value: notificationsProvider),
         ChangeNotifierProvider.value(value: audioEffectsService),
         ChangeNotifierProvider(
@@ -362,9 +408,8 @@ void main() async {
     // vive en SQLite justamente para esto; si está vacía, processQueue sale
     // enseguida sin hacer nada.
     downloadProvider.processQueue();
-    // El servidor oficial vive en un PC de casa, no siempre encendido: cada
-    // arranque en frío es una oportunidad razonable de comprobar si ya volvió
-    // y resolver solo lo que quedó en la lista de espera.
+    // Lo que quedó en la lista de espera por falta de conexión se resuelve
+    // en cada arranque en frío.
     downloadProvider.retryPendingImports();
     // La sincronización con la nube es solo manual (Ajustes > Sincronizar ahora).
     // Igual que syncNow(): nunca await'ado, y sin sesión simplemente no

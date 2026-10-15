@@ -4,8 +4,10 @@ import '../models/playlist.dart';
 import '../models/song.dart';
 import 'audio_identity.dart';
 import 'database_helper.dart';
+import 'folder_sync_format.dart' show folderSyncRootDirName;
 import 'library_storage.dart';
 import 'metadata_service.dart';
+import 'playlist_filter_logic.dart';
 
 /// Scans the SAF-backed library folder into SQLite. See CLAUDE.md D2/D3 for
 /// the reconciliation rules this implements — do not re-derive them here.
@@ -57,10 +59,7 @@ class LibraryScanService {
 
     var inserted = 0, moved = 0, updated = 0, unchanged = 0, unsupported = 0;
 
-    final playlistIdByName = <String, String>{};
-    for (final playlist in await _db.getPlaylists()) {
-      playlistIdByName[playlist.name] = playlist.id;
-    }
+    final playlistIdByName = localPlaylistIdsByName(await _db.getPlaylists());
 
     List<LibraryEntry> rootChildren;
     try {
@@ -71,6 +70,7 @@ class LibraryScanService {
       );
     }
     for (final entry in rootChildren) {
+      if (entry.isDir && entry.name.toLowerCase() == folderSyncRootDirName) continue;
       if (entry.isDir) {
         final playlistId = await _resolvePlaylistId(entry.name, playlistIdByName);
         final children = await _storage.list(entry.uri);

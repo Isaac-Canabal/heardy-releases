@@ -24,7 +24,7 @@ class DeviceStreamResolver implements StreamResolver {
       result = await _resolve(videoId);
     } on PlatformException catch (e) {
       throw DownloadSourceException(
-        e.code == YtStreamErrorCode.unavailable
+        e.code == YtStreamErrorCode.unavailable || e.code == YtStreamErrorCode.invalidUrl
             ? DownloadSourceErrorKind.notFound
             : DownloadSourceErrorKind.extraction,
         'Stream en el dispositivo: ${e.code}',

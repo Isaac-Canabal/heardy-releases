@@ -305,20 +305,63 @@ class HeardyCloudSource implements CloudSource {
     required List<Map<String, dynamic>> songs,
     required List<Map<String, dynamic>> playlists,
     required List<Map<String, dynamic>> playlistSongs,
+    List<Map<String, dynamic>> remoteTracks = const [],
+    List<Map<String, dynamic>> playlistRemoteTracks = const [],
   }) async {
+    Map<String, dynamic> body(bool withOnline) => {
+          'baseVersion': baseVersion,
+          if (contentHash != null) 'contentHash': contentHash,
+          'songs': songs,
+          'playlists': withOnline
+              ? playlists
+              : [
+                  for (final p in playlists)
+                    if (p['kind'] != 'online') p,
+                ],
+          'playlistSongs': playlistSongs,
+          if (withOnline && remoteTracks.isNotEmpty) 'remoteTracks': remoteTracks,
+          if (withOnline && playlistRemoteTracks.isNotEmpty) 'playlistRemoteTracks': playlistRemoteTracks,
+        };
+
+    final hasOnline = playlists.any((p) => p['kind'] == 'online') ||
+        remoteTracks.isNotEmpty ||
+        playlistRemoteTracks.isNotEmpty;
+    Map<String, dynamic> json;
+    try {
+      json = await _send('PUT', '/library', body(true), timeout: _libraryTimeout);
+    } on CloudSourceException catch (e) {
+      // Un servidor sin migrar rechaza con 422 los campos que no conoce
+      // (`extra="forbid"`). Se reintenta una vez sin la parte online: el
+      // respaldo de lo local sigue funcionando, y las playlists online
+      // esperan a que el servidor se actualice.
+      if (!hasOnline || e.statusCode != 422) rethrow;
+      appLog('HeardyCloudSource: el servidor no acepta playlists online, se sube sólo lo local');
+      json = await _send('PUT', '/library', body(false), timeout: _libraryTimeout);
+    }
+    return (json['version'] as num?)?.toInt() ?? baseVersion;
+  }
+
+  @override
+  Future<HistoryPushResult> pushRemoteHistory(List<Map<String, dynamic>> rows, {int? utcOffsetMinutes}) async {
     final json = await _send(
-      'PUT',
-      '/library',
+      'POST',
+      '/history/remote',
       {
-        'baseVersion': baseVersion,
-        if (contentHash != null) 'contentHash': contentHash,
-        'songs': songs,
-        'playlists': playlists,
-        'playlistSongs': playlistSongs,
+        'rows': rows,
+        if (utcOffsetMinutes != null) 'utcOffsetMinutes': utcOffsetMinutes,
       },
       timeout: _libraryTimeout,
     );
-    return (json['version'] as num?)?.toInt() ?? baseVersion;
+    return HistoryPushResult.fromJson(json);
+  }
+
+  @override
+  Future<CloudHistoryPage> getRemoteHistory({String? cursor, int limit = 500}) async {
+    final json = await _get('/history/remote', query: {
+      if (cursor != null) 'cursor': cursor,
+      'limit': '$limit',
+    });
+    return CloudHistoryPage.fromJson(json);
   }
 
   @override

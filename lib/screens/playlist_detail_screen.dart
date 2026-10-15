@@ -11,6 +11,7 @@ import '../widgets/desktop_shell_scope.dart';
 import '../widgets/song_tile.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/playlist_target_sheet.dart';
+import 'online_playlist_detail_screen.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
@@ -51,8 +52,9 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
     super.initState();
     // Load playlist tracks when screen mounts
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<MusicProvider>(context, listen: false)
-          .loadSongsForPlaylist(widget.playlistId);
+      final provider = Provider.of<MusicProvider>(context, listen: false);
+      final isOnline = provider.playlists.any((p) => p.id == widget.playlistId && p.isOnline);
+      if (!isOnline) provider.loadSongsForPlaylist(widget.playlistId);
     });
     _searchController.addListener(() {
       setState(() {
@@ -139,6 +141,7 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
       return _PlaylistGoneScaffold();
     }
     final playlist = matches.first;
+    if (playlist.isOnline) return OnlinePlaylistDetailScreen(playlistId: playlist.id);
 
     // Filter and sort tracks based on search bar and sort option
     final allSongs = musicProvider.currentPlaylistSongs;
@@ -606,7 +609,11 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
 
     switch (action) {
       case 'move':
-        final choice = await pickTargetPlaylist(context, excludePlaylistId: widget.playlistId);
+        final choice = await pickTargetPlaylist(
+          context,
+          excludePlaylistId: widget.playlistId,
+          kind: Playlist.kindLocal,
+        );
         if (choice == null || !mounted) return;
         final targetId = await resolveTargetPlaylistId(context, choice);
         if (targetId == null || !mounted) return;
@@ -623,7 +630,11 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
         }
         break;
       case 'copy':
-        final choice = await pickTargetPlaylist(context, excludePlaylistId: widget.playlistId);
+        final choice = await pickTargetPlaylist(
+          context,
+          excludePlaylistId: widget.playlistId,
+          kind: Playlist.kindLocal,
+        );
         if (choice == null || !mounted) return;
         final targetId = await resolveTargetPlaylistId(context, choice);
         if (targetId == null || !mounted) return;

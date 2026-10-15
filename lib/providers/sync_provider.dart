@@ -11,6 +11,8 @@ import '../l10n/app_localizations.dart';
 import '../services/friendly_error.dart';
 import '../services/database_helper.dart';
 import '../services/library_diff.dart';
+import '../models/playlist.dart';
+import '../models/remote_track_record.dart';
 import 'package:heardy/services/app_log.dart';
 
 /// Sincronización de cuenta (Etapa 16): índice de biblioteca + historial de
@@ -54,7 +56,33 @@ class SyncProvider with ChangeNotifier {
   String? _historyCursor;
   bool _historyCursorLoadedFromPrefs = false;
 
+  /// Mismo mecanismo que [_historyCursor] pero para `GET /history/remote`
+  /// (escuchas por streaming de pistas guardadas).
+  String? _remoteHistoryCursor;
+  bool _remoteCursorLoadedFromPrefs = false;
+  int? _lastRemoteFullPullAtMs;
+  String? _lastRemoteFullPullHash;
+
+  /// Un servidor sin migrar responde 404 a `/history/remote`: se deja de
+  /// intentar durante la sesión en vez de repetir el fallo en cada paso.
+  bool _remoteHistoryUnsupported = false;
+
+  /// Versión de `GET /library` ya incorporada acá; sirve para decidir si hay
+  /// algo nuevo que bajar (p. ej. playlists online de otro dispositivo) sin
+  /// depender de que el contenido local haya cambiado.
+  int? _lastSeenCloudVersion;
+  int _onlinePlaylistsRevision = 0;
+
+  /// Sube cada vez que una sincronización creó playlists online o les añadió
+  /// pistas que venían de la nube: quien muestre playlists lo observa para
+  /// recargarlas.
+  int get onlinePlaylistsRevision => _onlinePlaylistsRevision;
+
   static const _prefsKeyLastPushedHash = 'sync_last_pushed_library_hash';
+  static const _prefsKeyLastSeenCloudVersion = 'sync_last_seen_cloud_version';
+  static const _prefsKeyRemoteHistoryCursor = 'sync_remote_history_cursor';
+  static const _prefsKeyLastRemoteFullPullAt = 'sync_last_full_remote_history_at';
+  static const _prefsKeyLastRemoteFullPullHash = 'sync_last_full_remote_history_hash';
   static const _prefsKeyHistoryCursor = 'sync_history_cursor';
   static const _prefsKeyLastFullPullAt = 'sync_last_full_history_at';
   static const _prefsKeyLastFullPullHash = 'sync_last_full_history_hash';
@@ -141,9 +169,11 @@ class SyncProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// Orden de una pasada: `GET /account` → subir historial pendiente en
-  /// lotes de ≤500 → bajar el historial nuevo que otros dispositivos hayan
-  /// subido desde el cursor guardado → si el contenido cambió, `PUT /library`.
+  /// Orden de una pasada: `GET /account` → subir historial pendiente (local y
+  /// remoto) en lotes de ≤500 → bajar el historial nuevo que otros
+  /// dispositivos hayan subido desde el cursor guardado → biblioteca (une lo
+  /// de la nube, crea acá las playlists online que falten y sube si cambió)
+  /// → bajar el historial remoto, que necesita las pistas ya creadas.
   ///
   /// **La bajada automática de historial es lo que hace que las estadísticas
   /// coincidan entre dispositivos de la misma cuenta.** Antes `GET /history`
@@ -188,9 +218,13 @@ class SyncProvider with ChangeNotifier {
       // distingue cuál de las llamadas falló — que es exactamente lo que hizo
       // falta averiguar a mano la primera vez que esto no funcionó.
       final errors = [
-        await _runStep('historial', _pushUnsyncedHistory),
+        await _runStep('historial', () async {
+          await _pushUnsyncedHistory();
+          await _pushUnsyncedRemoteHistory();
+        }),
         await _runStep('historial-nuevo', () => _pullNewHistory(forceFull: fullHistory)),
-        await _runStep('biblioteca', _pushLibraryIfChanged),
+        await _runStep('biblioteca', _syncLibrary),
+        await _runStep('historial-nuevo', () => _pullRemoteHistory(forceFull: fullHistory)),
         await _runStep('presencia', _reconcileShareNowPlaying),
       ].whereType<FriendlyError>().toList();
 
@@ -301,6 +335,105 @@ class SyncProvider with ChangeNotifier {
     }
   }
 
+  /// Sube las escuchas por streaming de pistas guardadas. Un 404 (servidor sin
+  /// migrar) no es un error: se anota y se sigue con el resto de la pasada.
+  Future<void> _pushUnsyncedRemoteHistory() async {
+    if (_remoteHistoryUnsupported) return;
+    final offset = DateTime.now().timeZoneOffset.inMinutes;
+    while (true) {
+      final rows = await _db.getUnsyncedRemotePlays(limit: 500);
+      if (rows.isEmpty) return;
+
+      final ids = <int>[];
+      final payload = <Map<String, dynamic>>[];
+      for (final row in rows) {
+        ids.add(row['id'] as int);
+        final playedAtLocal = row['playedAtLocal'] as String;
+        payload.add({
+          'videoId': row['videoId'],
+          'playedAtLocal': playedAtLocal,
+          'playedAtUtc':
+              (row['playedAtUtc'] as String?) ?? DateTime.parse(playedAtLocal).toUtc().toIso8601String(),
+          'playSeconds': row['playSeconds'] ?? 0,
+        });
+      }
+      try {
+        await _source.pushRemoteHistory(payload, utcOffsetMinutes: offset);
+      } on CloudSourceException catch (e) {
+        if (e.kind != CloudSourceErrorKind.notFound) rethrow;
+        _remoteHistoryUnsupported = true;
+        appLog('SyncProvider: el servidor no tiene historial remoto todavía');
+        return;
+      }
+      await _db.markRemotePlaysSynced(ids);
+      if (rows.length < 500) return;
+    }
+  }
+
+  /// Baja el historial remoto de la cuenta y lo inserta sólo para pistas que
+  /// ya existen acá (por eso corre después del paso de biblioteca, que crea
+  /// las playlists online de otros dispositivos). Mismo criterio de cursor
+  /// que [_pullNewHistory]: pasada completa si se pide a mano, si cambió el
+  /// conjunto de pistas conocidas (pueden destrabar filas descartadas antes) o
+  /// si la última completa tiene más de 24 h.
+  Future<void> _pullRemoteHistory({bool forceFull = false}) async {
+    if (_remoteHistoryUnsupported) return;
+    final known = await _db.getRemoteTrackIds();
+    if (known.isEmpty) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (!_remoteCursorLoadedFromPrefs) {
+      _remoteCursorLoadedFromPrefs = true;
+      _remoteHistoryCursor ??= prefs.getString(_prefsKeyRemoteHistoryCursor);
+      _lastRemoteFullPullAtMs ??= prefs.getInt(_prefsKeyLastRemoteFullPullAt);
+      _lastRemoteFullPullHash ??= prefs.getString(_prefsKeyLastRemoteFullPullHash);
+    }
+
+    final trackHash = md5.convert(utf8.encode(([...known]..sort()).join(','))).toString();
+    final lastFullMs = _lastRemoteFullPullAtMs;
+    final stale = lastFullMs == null ||
+        DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(lastFullMs)) > _fullPullMaxAge;
+    final full = forceFull || stale || trackHash != _lastRemoteFullPullHash;
+    if (full) {
+      _remoteHistoryCursor = null;
+      await prefs.remove(_prefsKeyRemoteHistoryCursor);
+    }
+
+    var inserted = 0;
+    var cursor = _remoteHistoryCursor;
+    try {
+      while (true) {
+        final CloudHistoryPage page;
+        try {
+          page = await _source.getRemoteHistory(cursor: cursor);
+        } on CloudSourceException catch (e) {
+          if (e.kind != CloudSourceErrorKind.notFound) rethrow;
+          _remoteHistoryUnsupported = true;
+          return;
+        }
+        if (page.rows.isNotEmpty) {
+          inserted += await _db.insertRestoredRemotePlays(page.rows, known: known);
+        }
+        if (page.nextCursor == null) break;
+        cursor = page.nextCursor;
+        _remoteHistoryCursor = cursor;
+        await prefs.setString(_prefsKeyRemoteHistoryCursor, cursor!);
+      }
+    } finally {
+      if (inserted > 0) {
+        _historyRevision++;
+        notifyListeners();
+      }
+    }
+
+    if (full) {
+      _lastRemoteFullPullAtMs = DateTime.now().millisecondsSinceEpoch;
+      _lastRemoteFullPullHash = trackHash;
+      await prefs.setInt(_prefsKeyLastRemoteFullPullAt, _lastRemoteFullPullAtMs!);
+      await prefs.setString(_prefsKeyLastRemoteFullPullHash, trackHash);
+    }
+  }
+
   /// Baja las páginas de `GET /history` que aparecieron desde el cursor
   /// guardado — lo que otro dispositivo de la misma cuenta subió y este
   /// todavía no tiene. Mismo mecanismo que el botón manual de
@@ -385,16 +518,21 @@ class SyncProvider with ChangeNotifier {
   /// apertura repetía el `PUT /library` completo aunque nada hubiera
   /// cambiado desde la sesión anterior, gastando el cupo diario del
   /// endpoint sin motivo.
-  Future<void> _pushLibraryIfChanged() async {
+  Future<void> _syncLibrary() async {
     if (!_hashLoadedFromPrefs) {
       _hashLoadedFromPrefs = true;
       final prefs = await SharedPreferences.getInstance();
       _lastPushedContentHash ??= prefs.getString(_prefsKeyLastPushedHash);
+      _lastSeenCloudVersion ??= prefs.getInt(_prefsKeyLastSeenCloudVersion);
     }
 
-    final local = await _db.getLibraryIndexRows();
+    final local = await _db.getLibraryIndexRows(includeOnline: true);
     final localHash = _hashOf(local);
-    if (localHash == _lastPushedContentHash) return;
+    final needsPush = localHash != _lastPushedContentHash;
+    // La versión que informa `GET /account` ya dice si otro dispositivo
+    // cambió algo (p. ej. una playlist online) sin pedir la biblioteca.
+    final needsPull = _account != null && _account!.libraryVersion != _lastSeenCloudVersion;
+    if (!needsPush && !needsPull) return;
 
     final cloud = await _source.getLibrary();
     final merged = cloud == null
@@ -404,19 +542,71 @@ class SyncProvider with ChangeNotifier {
             cloudSongs: cloud.songs,
             cloudPlaylists: cloud.playlists,
             cloudPlaylistSongs: cloud.playlistSongs,
+            cloudOnlinePlaylists: cloud.onlinePlaylists,
+            cloudRemoteTracks: cloud.remoteTracks,
+            cloudPlaylistRemoteTracks: cloud.playlistRemoteTracks,
           );
 
-    final newVersion = await _source.pushLibrary(
-      baseVersion: cloud?.version ?? _libraryVersion,
-      contentHash: _hashOf(merged),
-      songs: merged['songs']!,
-      playlists: merged['playlists']!,
-      playlistSongs: merged['playlistSongs']!,
-    );
-    _libraryVersion = newVersion;
-    _lastPushedContentHash = localHash;
+    // Aditivo y sólo local: lo que la nube trae y acá falta se crea; nada se
+    // quita. Va antes de subir para que lo subido ya incluya el resultado.
+    final materialized = cloud == null ? false : await _materializeOnlinePlaylists(local, merged);
+
+    var version = cloud?.version ?? _libraryVersion;
+    if (needsPush) {
+      version = await _source.pushLibrary(
+        baseVersion: cloud?.version ?? _libraryVersion,
+        contentHash: _hashOf(merged),
+        songs: merged['songs']!,
+        playlists: merged['playlists']!,
+        playlistSongs: merged['playlistSongs']!,
+        remoteTracks: merged['remoteTracks'] ?? const [],
+        playlistRemoteTracks: merged['playlistRemoteTracks'] ?? const [],
+      );
+      _libraryVersion = version;
+    }
+    _lastSeenCloudVersion = version;
+
+    // Lo que acaba de crearse viene de la nube: no hay nada que devolverle,
+    // así que el índice local nuevo es el que cuenta como ya subido.
+    if (needsPush || materialized) {
+      _lastPushedContentHash =
+          materialized ? _hashOf(await _db.getLibraryIndexRows(includeOnline: true)) : localHash;
+    }
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsKeyLastPushedHash, localHash);
+    await prefs.setInt(_prefsKeyLastSeenCloudVersion, version);
+    if (_lastPushedContentHash != null) {
+      await prefs.setString(_prefsKeyLastPushedHash, _lastPushedContentHash!);
+    }
+  }
+
+  /// Crea las playlists online que existen en la nube y acá no, y añade al
+  /// final las pistas que a las que sí existen les faltan. Devuelve si cambió
+  /// algo.
+  Future<bool> _materializeOnlinePlaylists(
+    Map<String, List<Map<String, dynamic>>> local,
+    Map<String, List<Map<String, dynamic>>> merged,
+  ) async {
+    final plan = planOnlineMaterialization(local: local, merged: merged);
+    for (final item in plan) {
+      if (item.isNew) {
+        await _db.insertPlaylist(Playlist(
+          id: item.playlistId,
+          name: item.name,
+          creationDate: DateTime.now(),
+          originalUrl: item.originalUrl,
+          kind: Playlist.kindOnline,
+        ));
+      }
+      await _db.addRemoteTracksToPlaylist(
+        item.playlistId,
+        [for (final track in item.tracks) RemoteTrackRecord.fromMap(track)],
+      );
+    }
+    if (plan.isNotEmpty) {
+      _onlinePlaylistsRevision++;
+      notifyListeners();
+    }
+    return plan.isNotEmpty;
   }
 
   String _hashOf(Map<String, List<Map<String, dynamic>>> index) {
@@ -426,7 +616,19 @@ class SyncProvider with ChangeNotifier {
     final playlists = [...index['playlists']!]..sort((a, b) => '${a['playlistId']}'.compareTo('${b['playlistId']}'));
     final playlistSongs = [...index['playlistSongs']!]
       ..sort((a, b) => '${a['playlistId']}${a['songId']}'.compareTo('${b['playlistId']}${b['songId']}'));
-    final bytes = utf8.encode(jsonEncode({'s': songs, 'p': playlists, 'ps': playlistSongs}));
+    // Las listas remotas sólo entran al hash cuando hay algo: quien no usa
+    // playlists online conserva el hash de siempre (y no resube por esto).
+    final remoteTracks = [...?index['remoteTracks']]
+      ..sort((a, b) => '${a['videoId']}'.compareTo('${b['videoId']}'));
+    final playlistRemoteTracks = [...?index['playlistRemoteTracks']]
+      ..sort((a, b) => '${a['playlistId']}${a['videoId']}'.compareTo('${b['playlistId']}${b['videoId']}'));
+    final bytes = utf8.encode(jsonEncode({
+      's': songs,
+      'p': playlists,
+      'ps': playlistSongs,
+      if (remoteTracks.isNotEmpty) 'rt': remoteTracks,
+      if (playlistRemoteTracks.isNotEmpty) 'prt': playlistRemoteTracks,
+    }));
     return md5.convert(bytes).toString();
   }
 
@@ -519,10 +721,35 @@ class SyncProvider with ChangeNotifier {
     await prefs.remove(_prefsKeyHistoryCursor);
     await prefs.remove(_prefsKeyLastFullPullAt);
     await prefs.remove(_prefsKeyLastFullPullHash);
+    await prefs.remove(_prefsKeyLastSeenCloudVersion);
+    await prefs.remove(_prefsKeyRemoteHistoryCursor);
+    await prefs.remove(_prefsKeyLastRemoteFullPullAt);
+    await prefs.remove(_prefsKeyLastRemoteFullPullHash);
     _lastFullPullAtMs = null;
     _lastFullPullHash = null;
+    _lastSeenCloudVersion = null;
+    _remoteHistoryCursor = null;
+    _remoteCursorLoadedFromPrefs = true;
+    _lastRemoteFullPullAtMs = null;
+    _lastRemoteFullPullHash = null;
     _libraryVersion = 0;
     _lastSyncAt = null;
     notifyListeners();
   }
+}
+
+/// Recarga lo que muestra la biblioteca cuando una sincronización crea
+/// playlists online desde la nube ([SyncProvider.onlinePlaylistsRevision]).
+/// `SyncProvider` no conoce a `MusicProvider` (ver su doc), así que el cableado
+/// vive donde se crean ambos. Devuelve el listener para poder quitarlo.
+VoidCallback bindOnlinePlaylistsRefresh(SyncProvider sync, Future<void> Function() reload) {
+  var seen = sync.onlinePlaylistsRevision;
+  void listener() {
+    if (sync.onlinePlaylistsRevision == seen) return;
+    seen = sync.onlinePlaylistsRevision;
+    reload();
+  }
+
+  sync.addListener(listener);
+  return listener;
 }

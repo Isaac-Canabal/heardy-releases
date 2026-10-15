@@ -36,16 +36,17 @@ const List<LegalSection> termsSections = [
         'biblioteca nunca se sube a ningún servidor, ni siquiera cuando usas la cuenta opcional. El '
         'operador no mantiene un catálogo de contenidos ni pone ningún contenido a disposición de '
         'otros usuarios.\n\n'
-        'Cuando usas la importación desde enlaces, el servidor de extracción obtiene el archivo que '
-        'pides solo para ti y lo entrega a tu dispositivo, conservando como máximo una caché técnica '
-        'temporal de tamaño limitado. La función opcional de escucha en streaming resuelve la transmisión en tu propio '
+        'Cuando usas la importación desde enlaces, la descarga se realiza en tu propio dispositivo: '
+        'la aplicación obtiene el archivo que pides directamente de la plataforma de origen y lo guarda '
+        'en tu biblioteca. El servidor del operador no interviene en esa obtención ni conserva copia '
+        'alguna. La función opcional de escucha en streaming también resuelve la transmisión en tu propio '
         'dispositivo.',
   ),
   LegalSection(
     '3. Importación desde enlaces y contenido de terceros',
     'De forma secundaria y opcional, Heardy permite importar audio a la biblioteca local a partir '
-        'de un enlace a plataformas de terceros, mediante un servidor de extracción operado por el '
-        'operador o por ti. El uso de esta función es tu exclusiva responsabilidad. Al utilizarla '
+        'de un enlace a plataformas de terceros, mediante una descarga que se ejecuta en tu '
+        'propio dispositivo. El uso de esta función es tu exclusiva responsabilidad. Al utilizarla '
         'declaras y garantizas que:\n\n'
         '• tienes derecho a obtener y conservar una copia del contenido (porque lo has adquirido, '
         'cuentas con una licencia que lo permite, es de tu autoría o está en el dominio público);\n'
@@ -58,12 +59,9 @@ const List<LegalSection> termsSections = [
         'bloquear cualquier identificador de origen (véase la sección 9).\n\n'
         'El operador no verifica estas declaraciones. Si no puedes hacerlas, no uses estas '
         'funciones.\n\n'
-        'El servidor ejecuta, a petición tuya y para ti, la descarga de un archivo concreto que tú '
-        'identificas. El operador no revisa previamente cada enlace y no adquiere ningún derecho '
-        'sobre el archivo. El servidor conserva el archivo solicitado en una caché de tamaño '
-        'limitado, identificada únicamente por el identificador del vídeo y no vinculada a tu '
-        'cuenta, hasta que se reemplaza al alcanzarse el límite o el operador la borra; no lo ofrece '
-        'a otros usuarios como catálogo. El operador puede limitar, suspender o retirar esta función '
+        'Tu dispositivo ejecuta, a petición tuya y para ti, la descarga de un archivo concreto que tú '
+        'identificas. El operador no revisa previamente cada enlace, no interviene en la obtención del '
+        'archivo, no recibe ni conserva copia de él y no adquiere ningún derecho sobre él. El operador puede limitar, suspender o retirar esta función '
         'en cualquier momento, bloquear identificadores, enlaces o cuentas ante indicios de uso '
         'indebido, y atenderá los requerimientos legítimos de autoridades y titulares de derechos '
         'conforme a la sección 9.\n\n'
@@ -243,10 +241,11 @@ const List<LegalSection> privacySections = [
         '• Nombre de usuario y relaciones de amistad.\n'
         '• «Escuchando ahora», solo si lo activas: visible solo para tus amigos y caduca al terminar la '
         'canción. Está desactivado por defecto.\n'
-        '• Uso de Explorar, importar y buscar: las búsquedas que haces, los enlaces que importas, el '
-        'país que eliges en Explorar y los identificadores de vídeo de tus canciones más escuchadas '
+        '• Uso de Explorar: las búsquedas que haces en Explorar, el '
+        'país que eliges y los identificadores de vídeo de tus canciones más escuchadas '
         'que tienen enlace de origen (para generar recomendaciones). Se procesan en el servidor para '
-        'atender cada solicitud.\n'
+        'atender cada solicitud. Las búsquedas y los enlaces que usas para descargar se resuelven en tu '
+        'dispositivo y no pasan por el servidor del operador.\n'
         '• Datos técnicos mínimos para operar el servicio (cuotas por cuenta, marcas de sincronización, '
         'registros que nunca combinan tu identidad con el contenido de tus datos).',
   ),
@@ -317,11 +316,8 @@ const List<LegalSection> privacySections = [
   LegalSection(
     '10. Seguridad y menores',
     'La comunicación con el servidor va cifrada; el acceso exige un token de sesión que caduca; el '
-        'servidor no guarda contraseñas. Al importar desde un enlace, el servidor descarga el archivo '
-        'que pides para entregártelo y lo conserva en una caché técnica de tamaño limitado, '
-        'identificada únicamente por el identificador del vídeo y no vinculada a tu cuenta, hasta que '
-        'se reemplaza al alcanzarse el límite o el operador la borra; no se ofrece a otros usuarios '
-        'como catálogo. Heardy no está dirigido a menores de 14 años; la '
+        'servidor no guarda contraseñas. Al importar desde un enlace, la descarga se hace en tu '
+        'dispositivo: el servidor del operador no la recibe ni conserva copia del archivo. Heardy no está dirigido a menores de 14 años; la '
         'cuenta opcional es para mayores de edad, o para mayores de 14 con autorización de sus padres o '
         'tutores (artículo 7 de la Ley 1581 de 2012). Si crees que un menor facilitó datos sin esa '
         'autorización, escríbenos y los eliminaremos.',

@@ -9,6 +9,33 @@ import '../screens/now_playing_screen.dart';
 import '../l10n/app_localizations.dart';
 import 'desktop_shell_scope.dart';
 
+/// Alto del mini-reproductor: barra de progreso de 3 + cuerpo de 68.
+const double kMiniPlayerHeight = 71;
+
+/// Alto que una pantalla debe dejar libre abajo para que el mini-reproductor
+/// (superpuesto en el shell) no tape sus controles. En escritorio la barra de
+/// reproducción es otra y no se superpone.
+double miniPlayerReservedHeight({required bool hasMedia, required bool desktopShell}) =>
+    hasMedia && !desktopShell ? kMiniPlayerHeight : 0;
+
+/// Espacio que sube los controles fijos al pie de una pantalla (p. ej. la
+/// barra de acciones de la bandeja) por encima del mini-reproductor.
+class MiniPlayerInset extends StatelessWidget {
+  const MiniPlayerInset({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final desktop = DesktopShellScope.maybeOf(context) != null;
+    final audioHandler = Provider.of<AudioPlayerHandler>(context, listen: false);
+    return StreamBuilder<MediaItem?>(
+      stream: audioHandler.mediaItem,
+      builder: (context, snapshot) => SizedBox(
+        height: miniPlayerReservedHeight(hasMedia: snapshot.data != null, desktopShell: desktop),
+      ),
+    );
+  }
+}
+
 class MiniPlayer extends StatelessWidget {
   const MiniPlayer({super.key});
 

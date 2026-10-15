@@ -22,6 +22,7 @@ import '../widgets/max_width_center.dart';
 import '../widgets/playback_options_sheet.dart';
 import '../l10n/app_localizations.dart';
 import '../services/app_log.dart';
+import '../services/open_artist_profile.dart';
 import '../services/stream_queue_logic.dart';
 import '../services/waveform_defaults.dart';
 import '../widgets/waveform_seek_bar.dart';
@@ -76,6 +77,18 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
       context.read<SettingsProvider>().dynamicNowPlayingColor
           ? (_coverAccent ?? AppTheme.primary)
           : AppTheme.primary;
+
+  bool _openingArtist = false;
+
+  Future<void> _openArtist(String credits) {
+    if (_openingArtist) return Future.value();
+    return openArtistProfile(
+      context,
+      credits,
+      isMounted: () => mounted,
+      setBusy: (busy) => setState(() => _openingArtist = busy),
+    );
+  }
 
   Future<void> _addCurrent(MediaItem item) =>
       addCurrentTrackToPlaylist(context, item, isMounted: () => mounted);
@@ -290,15 +303,12 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              Text(
-                                mediaItem.artist ?? l10n.commonUnknownArtist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  color: Colors.grey[400],
-                                  fontSize: 16,
-                                ),
+                              ArtistLink(
+                                label: mediaItem.artist ?? l10n.commonUnknownArtist,
+                                busy: _openingArtist,
+                                onTap: (mediaItem.artist ?? '').trim().isEmpty
+                                    ? null
+                                    : () => _openArtist(mediaItem.artist!),
                               ),
                             ],
                           ),
@@ -2199,6 +2209,50 @@ class _SmartAlbumArtState extends State<SmartAlbumArt> {
         Icons.music_note,
         color: Colors.white70,
         size: widget.size * 0.5,
+      ),
+    );
+  }
+}
+
+class ArtistLink extends StatelessWidget {
+  final String label;
+  final bool busy;
+  final VoidCallback? onTap;
+  final double fontSize;
+
+  const ArtistLink({
+    super.key,
+    required this.label,
+    required this.busy,
+    required this.onTap,
+    this.fontSize = 16,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      textAlign: TextAlign.center,
+      style: TextStyle(color: onTap == null ? Colors.grey[400] : Colors.grey[300], fontSize: fontSize),
+    );
+    if (onTap == null) return text;
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(child: text),
+            const SizedBox(width: 2),
+            busy
+                ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+                : Icon(Icons.chevron_right, size: 18, color: Colors.grey[500]),
+          ],
+        ),
       ),
     );
   }

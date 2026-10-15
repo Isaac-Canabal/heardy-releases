@@ -1,11 +1,18 @@
 import 'dart:convert';
 
 class Playlist {
+  /// Playlist de canciones descargadas (archivos en la biblioteca).
+  static const String kindLocal = 'local';
+
+  /// Playlist de referencias a YouTube que suenan por streaming.
+  static const String kindOnline = 'online';
+
   final String id;
   final String name;
   final DateTime creationDate;
   final int sortOrder;
   final String? originalUrl;
+  final String kind;
 
   Playlist({
     required this.id,
@@ -13,7 +20,10 @@ class Playlist {
     required this.creationDate,
     this.sortOrder = 0,
     this.originalUrl,
+    this.kind = kindLocal,
   });
+
+  bool get isOnline => kind == kindOnline;
 
   Map<String, dynamic> toMap() {
     return {
@@ -22,6 +32,7 @@ class Playlist {
       'creationDate': creationDate.toIso8601String(),
       'sortOrder': sortOrder,
       'originalUrl': originalUrl,
+      'kind': kind,
     };
   }
 
@@ -32,6 +43,7 @@ class Playlist {
       creationDate: DateTime.parse(map['creationDate'] as String),
       sortOrder: (map['sortOrder'] as int?) ?? 0,
       originalUrl: map['originalUrl'] as String?,
+      kind: map['kind'] == kindOnline ? kindOnline : kindLocal,
     );
   }
 
@@ -42,6 +54,7 @@ class Playlist {
       creationDate: creationDate,
       sortOrder: sortOrder ?? this.sortOrder,
       originalUrl: originalUrl ?? this.originalUrl,
+      kind: kind,
     );
   }
 

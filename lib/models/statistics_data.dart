@@ -127,3 +127,20 @@ class StatisticsData {
         'topSongs': topSongs.map((s) => s.toMap()).toList(),
       };
 }
+
+/// Une las filas de las canciones locales y de las pistas remotas guardadas
+/// (ids distintos, `yt:` para las remotas), ordena por reproducciones
+/// (empate: por título, para que el orden sea estable) y se queda con [limit].
+List<Map<String, dynamic>> mergeTopSongRows(
+  List<Map<String, dynamic>> local,
+  List<Map<String, dynamic>> remote, {
+  required int limit,
+}) {
+  int count(Map<String, dynamic> r) => (r['playCount'] as num?)?.toInt() ?? 0;
+  final all = [...local, ...remote]..sort((a, b) {
+      final byCount = count(b).compareTo(count(a));
+      if (byCount != 0) return byCount;
+      return ((a['title'] as String?) ?? '').compareTo((b['title'] as String?) ?? '');
+    });
+  return all.take(limit).toList();
+}

@@ -27,7 +27,6 @@ class SettingsProvider with ChangeNotifier {
   static const _accountPromptSeenKey = 'account_prompt_seen';
   static const _shareNowPlayingKey = 'share_now_playing';
   static const _dynamicNowPlayingColorKey = 'dynamic_now_playing_color';
-  static const normalizeVolumeKey = 'normalize_volume';
   static const skipSilenceKey = 'skip_silence';
   static const trackFadeKey = 'track_fade';
   static const _legalAcceptedVersionKey = 'legal_accepted_version';
@@ -50,7 +49,6 @@ class SettingsProvider with ChangeNotifier {
   bool _accountPromptSeen = false;
   bool _shareNowPlaying = false;
   bool _dynamicNowPlayingColor = true;
-  bool _normalizeVolume = false;
   bool _skipSilence = false;
   bool _trackFade = false;
   String? _legalAcceptedVersion;
@@ -68,7 +66,6 @@ class SettingsProvider with ChangeNotifier {
   bool get accountPromptSeen => _accountPromptSeen;
   bool get shareNowPlaying => _shareNowPlaying;
   bool get dynamicNowPlayingColor => _dynamicNowPlayingColor;
-  bool get normalizeVolume => _normalizeVolume;
   bool get skipSilence => _skipSilence;
   bool get trackFade => _trackFade;
 
@@ -146,7 +143,6 @@ class SettingsProvider with ChangeNotifier {
     _accountPromptSeen = prefs.getBool(_accountPromptSeenKey) ?? false;
     _shareNowPlaying = prefs.getBool(_shareNowPlayingKey) ?? false;
     _dynamicNowPlayingColor = prefs.getBool(_dynamicNowPlayingColorKey) ?? true;
-    _normalizeVolume = prefs.getBool(normalizeVolumeKey) ?? false;
     _skipSilence = prefs.getBool(skipSilenceKey) ?? false;
     _trackFade = prefs.getBool(trackFadeKey) ?? false;
     _legalAcceptedVersion = prefs.getString(_legalAcceptedVersionKey);
@@ -215,13 +211,6 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_dynamicNowPlayingColorKey, enabled);
-  }
-
-  Future<void> setNormalizeVolume(bool enabled) async {
-    _normalizeVolume = enabled;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(normalizeVolumeKey, enabled);
   }
 
   Future<void> setSkipSilence(bool enabled) async {

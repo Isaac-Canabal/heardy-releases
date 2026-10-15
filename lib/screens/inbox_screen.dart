@@ -6,11 +6,13 @@ import '../models/playlist.dart';
 import '../models/song.dart';
 import '../providers/music_provider.dart';
 import '../services/database_helper.dart';
+import '../services/playlist_filter_logic.dart';
 import '../services/storage_service.dart';
 import '../services/library_scan_service.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
+import '../widgets/mini_player.dart';
 import '../services/friendly_error.dart';
 import 'cloud_library_screen.dart';
 
@@ -204,7 +206,12 @@ class _InboxScreenState extends State<InboxScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) =>
-          _AssignToPlaylistsSheet(playlists: musicProvider.playlists),
+          _AssignToPlaylistsSheet(
+            playlists: playlistsOfKind(
+              musicProvider.playlists,
+              Playlist.kindLocal,
+            ),
+          ),
     );
     if (result == null || !mounted) return;
 
@@ -466,6 +473,7 @@ class _InboxScreenState extends State<InboxScreen> {
                       ),
               ),
             ),
+          if (hasSelection) const MiniPlayerInset(),
         ],
       ),
     );

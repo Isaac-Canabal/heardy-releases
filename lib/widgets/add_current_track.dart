@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
+import '../models/playlist.dart';
 import '../providers/music_provider.dart';
 import '../services/explore_logic.dart';
 import 'playlist_target_sheet.dart';
@@ -25,7 +26,7 @@ Future<void> addCurrentTrackToPlaylist(
         isMounted: isMounted,
       );
     case NowPlayingAddAction.addLocal:
-      final choice = await pickTargetPlaylist(context);
+      final choice = await pickTargetPlaylist(context, kind: Playlist.kindLocal);
       if (choice == null || !isMounted()) return;
       // ignore: use_build_context_synchronously
       final playlistId = await resolveTargetPlaylistId(context, choice);

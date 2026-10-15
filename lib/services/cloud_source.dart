@@ -131,11 +131,25 @@ class CloudLibrary {
   final List<Map<String, dynamic>> playlists;
   final List<Map<String, dynamic>> playlistSongs;
 
+  /// Playlists online (`kind: 'online'`), APARTE de [playlists] a propósito:
+  /// quien restaura archivos (`sync_status_screen.dart`, la pantalla de
+  /// "En tus otros dispositivos") recorre [playlists] y las recrearía como
+  /// playlists locales vacías. Sus pistas son referencias, no archivos.
+  final List<Map<String, dynamic>> onlinePlaylists;
+
+  /// Referencias a pistas de YouTube (`videoId`, título...). Nunca se ofrecen
+  /// como archivo que descargar ni cuentan como canciones que faltan.
+  final List<Map<String, dynamic>> remoteTracks;
+  final List<Map<String, dynamic>> playlistRemoteTracks;
+
   const CloudLibrary({
     required this.version,
     required this.songs,
     required this.playlists,
     required this.playlistSongs,
+    this.onlinePlaylists = const [],
+    this.remoteTracks = const [],
+    this.playlistRemoteTracks = const [],
   });
 
   /// `GET /library` es asimétrico con `PUT /library` a propósito de cómo
@@ -148,26 +162,51 @@ class CloudLibrary {
   /// app — encuentra `null` siempre y trata todo como "sin hash", nunca como
   /// "falta" ni "está" (bug real: así es como `missingCloudSongs` reportaba
   /// falsamente "no falta nada", siempre, contra el servidor real).
-  factory CloudLibrary.fromJson(Map<String, dynamic> json) => CloudLibrary(
-        version: (json['version'] as num?)?.toInt() ?? 0,
-        songs: _camelCaseRows(json['songs'], const {
-          'song_id': 'songId',
-          'duration_seconds': 'durationSeconds',
-          'file_hash': 'fileHash',
-          'hash_kind': 'hashKind',
-          'source_url': 'sourceUrl',
-        }),
-        playlists: _camelCaseRows(json['playlists'], const {
-          'playlist_id': 'playlistId',
-          'sort_order': 'sortOrder',
-          'original_url': 'originalUrl',
-        }),
-        playlistSongs: _camelCaseRows(json['playlistSongs'], const {
-          'playlist_id': 'playlistId',
-          'song_id': 'songId',
-          'order_index': 'orderIndex',
-        }),
-      );
+  ///
+  /// Un servidor anterior a las playlists online no manda `kind` ni las dos
+  /// listas remotas: sin `kind` una playlist es local, y las listas ausentes
+  /// quedan vacías.
+  factory CloudLibrary.fromJson(Map<String, dynamic> json) {
+    final allPlaylists = _camelCaseRows(json['playlists'], const {
+      'playlist_id': 'playlistId',
+      'sort_order': 'sortOrder',
+      'original_url': 'originalUrl',
+    });
+    return CloudLibrary(
+      version: (json['version'] as num?)?.toInt() ?? 0,
+      songs: _camelCaseRows(json['songs'], const {
+        'song_id': 'songId',
+        'duration_seconds': 'durationSeconds',
+        'file_hash': 'fileHash',
+        'hash_kind': 'hashKind',
+        'source_url': 'sourceUrl',
+      }),
+      playlists: [
+        for (final row in allPlaylists)
+          if (row['kind'] != 'online') row,
+      ],
+      onlinePlaylists: [
+        for (final row in allPlaylists)
+          if (row['kind'] == 'online') row,
+      ],
+      playlistSongs: _camelCaseRows(json['playlistSongs'], const {
+        'playlist_id': 'playlistId',
+        'song_id': 'songId',
+        'order_index': 'orderIndex',
+      }),
+      remoteTracks: _camelCaseRows(json['remoteTracks'], const {
+        'video_id': 'videoId',
+        'duration_seconds': 'durationSeconds',
+        'thumbnail_url': 'thumbnailUrl',
+        'source_url': 'sourceUrl',
+      }),
+      playlistRemoteTracks: _camelCaseRows(json['playlistRemoteTracks'], const {
+        'playlist_id': 'playlistId',
+        'video_id': 'videoId',
+        'order_index': 'orderIndex',
+      }),
+    );
+  }
 
   static List<Map<String, dynamic>> _camelCaseRows(
     Object? rawList,
@@ -303,9 +342,18 @@ abstract class CloudSource {
     required List<Map<String, dynamic>> songs,
     required List<Map<String, dynamic>> playlists,
     required List<Map<String, dynamic>> playlistSongs,
+    List<Map<String, dynamic>> remoteTracks = const [],
+    List<Map<String, dynamic>> playlistRemoteTracks = const [],
   });
 
   Future<HistoryPushResult> pushHistory(List<Map<String, dynamic>> rows, {int? utcOffsetMinutes});
+
+  /// Escuchas por streaming de pistas guardadas (clave: `videoId`). Un
+  /// servidor que no las conoce responde 404: [CloudSourceException] con
+  /// `kind == notFound`, que el llamador trata como "no soportado".
+  Future<HistoryPushResult> pushRemoteHistory(List<Map<String, dynamic>> rows, {int? utcOffsetMinutes});
+
+  Future<CloudHistoryPage> getRemoteHistory({String? cursor, int limit = 500});
 
   /// Una página del historial propio guardado en la nube. [cursor] `null`
   /// empieza por el principio; [CloudHistoryPage.nextCursor] `null` significa

@@ -27,6 +27,13 @@ third-party components. This list is not exhaustive for transitive dependencies.
     was added).
   Heardy is not affiliated with or endorsed by the NewPipe project.
 
+## Bundled binaries (Windows)
+
+- **yt-dlp** (https://github.com/yt-dlp/yt-dlp), Unlicense. The executable is downloaded at build time and updated by the
+  app; it embeds third-party components under their own licenses (see the yt-dlp project).
+- **FFmpeg** (LGPL build by BtbN/FFmpeg-Builds, https://github.com/BtbN/FFmpeg-Builds), LGPL-2.1-or-later, run as a
+  separate process; shipped with its `LICENSE.txt` in the `ffmpeg` folder.
+
 ## Other Android libraries (via `packages/heardy_yt_stream`)
 
 - **nanojson** (TeamNewPipe fork of grack/nanojson), Apache-2.0.
