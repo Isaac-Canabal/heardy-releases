@@ -268,7 +268,12 @@ class DatabaseHelper {
       // Playlists online: referencias a YouTube que suenan por streaming.
       // `songs` no se toca, así que la bandeja, el escáner y "ya descargada"
       // no ven estas pistas. Las playlists existentes quedan como 'local'.
-      await db.execute("ALTER TABLE playlists ADD COLUMN kind TEXT NOT NULL DEFAULT 'local'");
+      // Una migración interrumpida puede haber dejado la columna sin que la
+      // versión llegara a subir: repetir el ALTER fallaría en cada arranque.
+      final playlistColumns = await db.rawQuery('PRAGMA table_info(playlists)');
+      if (!playlistColumns.any((c) => c['name'] == 'kind')) {
+        await db.execute("ALTER TABLE playlists ADD COLUMN kind TEXT NOT NULL DEFAULT 'local'");
+      }
       for (final sql in _onlinePlaylistSql) {
         await db.execute(sql);
       }
