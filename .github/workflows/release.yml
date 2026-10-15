@@ -228,8 +228,7 @@ jobs:
           if [ -s "$f" ]; then
             echo "path=$f" >> "$GITHUB_OUTPUT"
           else
-            printf 'Heardy %s
-' "$VERSION" > notes-fallback.md
+            echo "Heardy $VERSION" > notes-fallback.md
             echo "path=notes-fallback.md" >> "$GITHUB_OUTPUT"
           fi
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
