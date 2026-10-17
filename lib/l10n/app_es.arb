@@ -497,7 +497,7 @@
   "notificationsUpdateTitle": "Nueva versión disponible: {name}",
   "@notificationsUpdateTitle": {"placeholders": {"name": {"type": "String"}}},
   "notificationsViewRelease": "Ver en GitHub",
-  "notificationsDownloadFromWebsite": "Desde la web",
+  "notificationsGoToDownloads": "Ir a la página de descargas",
   "notificationsDismiss": "Descartar",
 
   "shareStatsButton": "Compartir",

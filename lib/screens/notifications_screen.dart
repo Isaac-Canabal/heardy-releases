@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -136,7 +134,7 @@ class NotificationsScreen extends StatelessWidget {
               Text(item.body, style: const TextStyle(color: Colors.white54)),
             ],
             const SizedBox(height: 12),
-            // `Wrap`, no `Row`: cuatro botones con etiquetas de texto no
+            // `Wrap`, no `Row`: tres botones con etiquetas de texto no
             // entran en el ancho de un teléfono angosto — un `Row` sin
             // `Expanded`/`Flexible` simplemente pinta fuera de los márgenes
             // de la tarjeta en vez de acomodarse. `Wrap` los pasa a una
@@ -154,15 +152,9 @@ class NotificationsScreen extends StatelessWidget {
                   onPressed: info.htmlUrl.isEmpty ? null : () => _openRelease(info.htmlUrl),
                   child: Text(l10n.notificationsViewRelease),
                 ),
-                OutlinedButton(
-                  onPressed: () => _openRelease(heardyWebsiteUrl),
-                  child: Text(l10n.notificationsDownloadFromWebsite),
-                ),
                 FilledButton(
-                  onPressed: () => _openRelease(
-                    releaseAssetDownloadUrl(info.tag, isAndroid: Platform.isAndroid),
-                  ),
-                  child: Text(l10n.importDownloadButton),
+                  onPressed: () => _openRelease(heardyDownloadsUrl),
+                  child: Text(l10n.notificationsGoToDownloads),
                 ),
               ],
             ),

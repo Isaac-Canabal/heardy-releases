@@ -50,30 +50,9 @@ abstract class AppUpdateSource {
   Future<AppUpdateInfo?> getLatestRelease();
 }
 
-/// Repo de sólo binarios (`Isaac-Canabal/heardy-releases`), separado del
-/// código fuente a propósito: permite que el repo con el código se ponga en
-/// privado (menos exposición pública de cómo se esquivan las protecciones
-/// anti-bot de YouTube) sin dejar de tener un lugar público donde alojar los
-/// releases — ver las notas de trabajo locales para el porqué completo.
+/// Repo público de releases (`Isaac-Canabal/heardy-releases`): código fuente y
+/// notas de cada versión (tags `vX.Y.Z`); los binarios se sirven desde el sitio.
 const String _githubRepo = 'Isaac-Canabal/heardy-releases';
-
-/// El nombre exacto del binario que cada plataforma sube a un release de
-/// GitHub — mismo convenio que ya usan `web/src/content/downloads.ts` (el
-/// botón "Descargar" del sitio) y `windows/installer/heardy.iss`: **siempre
-/// este nombre, sin sufijo de versión**, así el enlace de descarga directa
-/// no cambia de un release al siguiente. `isAndroid` se recibe en vez de
-/// leerse con `Platform.isAndroid` acá adentro para que esto sea una función
-/// pura, comprobable con `flutter test` para las dos ramas — el host de test
-/// siempre reporta como no-Android (ver `library_storage.dart`).
-String releaseAssetFileName({required bool isAndroid}) =>
-    isAndroid ? 'Heardy.apk' : 'Heardy-Setup.exe';
-
-/// El enlace de descarga directa del binario de esta plataforma para un tag
-/// de release dado (p. ej. `v1.1.2`).
-String releaseAssetDownloadUrl(String tag, {required bool isAndroid}) =>
-    isValidReleaseTag(tag)
-        ? 'https://github.com/$_githubRepo/releases/download/$tag/${releaseAssetFileName(isAndroid: isAndroid)}'
-        : '';
 
 final RegExp _releaseTagPattern = RegExp(r'^v\d+\.\d+\.\d+$');
 
@@ -81,6 +60,8 @@ bool isValidReleaseTag(String tag) => _releaseTagPattern.hasMatch(tag);
 
 const Set<String> _allowedExternalHosts = {
   'github.com',
+  'vainastech.com',
+  'www.vainastech.com',
   'heardy.vainastech.workers.dev',
 };
 
@@ -97,10 +78,13 @@ Uri? safeExternalUri(String? url) {
 
 /// El sitio público de Heardy — mismo dominio que `web/src/content/site.ts`
 /// (`site.url`, documentado ahí como el dominio público para metadatos
-/// OpenGraph, así que no es sensible). Un botón alternativo al enlace
-/// directo del asset, para quien prefiera pasar por la página en vez de
-/// bajar un binario a ciegas desde una notificación.
-const String heardyWebsiteUrl = 'https://heardy.vainastech.workers.dev';
+/// OpenGraph, así que no es sensible).
+const String heardyWebsiteUrl = 'https://vainastech.com/heardy/';
+
+/// Los binarios sólo se descargan desde la sección de descargas del sitio;
+/// el release de GitHub lleva únicamente las notas. Todo aviso de versión
+/// nueva abre esta URL, sin importar lo que traiga guardado una versión vieja.
+const String heardyDownloadsUrl = 'https://vainastech.com/heardy/#descargas';
 
 /// La API pública de GitHub Releases, sin autenticar (60 peticiones/hora por
 /// IP de sobra para una consulta por arranque en frío). **Para que esto

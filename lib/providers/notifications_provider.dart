@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -174,8 +172,8 @@ class NotificationsProvider with ChangeNotifier {
         id: 'update:${release.tag}'.hashCode,
         title: _l10n.notificationsUpdateTitle(release.name.isEmpty ? release.tag : release.name),
         body: release.body,
-        downloadUrl: releaseAssetDownloadUrl(release.tag, isAndroid: Platform.isAndroid),
-        downloadLabel: _l10n.importDownloadButton,
+        downloadUrl: heardyDownloadsUrl,
+        downloadLabel: _l10n.notificationsGoToDownloads,
         viewUrl: release.htmlUrl,
         viewLabel: _l10n.notificationsViewRelease,
       );

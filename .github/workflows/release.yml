@@ -1,14 +1,22 @@
 name: Release
 
-# Builds the Android APK and the Windows installer, then publishes them as a GitHub
-# Release named after the tag, with the asset names the app's updater expects (Heardy.apk, Heardy-Setup.exe).
+# Builds the Android APK and the Windows installer and uploads them to a private Cloudflare R2 bucket
+# (the website https://vainastech.com/heardy/ serves them from there; binaries are NOT attached to the GitHub
+# Release). Each build uploads to staging/<tag>/<file>; only after both builds succeeded the release job promotes
+# the objects to <file> (the "latest" the site serves) and archive/<tag>/<file>, then creates the GitHub Release
+# (tag + notes only), which is how the app learns of new versions.
 #
 # Required repository secrets (Settings > Secrets and variables > Actions):
 #   ANDROID_KEYSTORE_BASE64            base64 of the release keystore (.jks)
 #   ANDROID_KEYSTORE_PASSWORD
 #   ANDROID_KEY_PASSWORD
 #   ANDROID_KEY_ALIAS
-# Optional repository variable:
+#   R2_ACCESS_KEY_ID                   R2 API token (Object Read & Write, scoped to the bucket): access key id
+#   R2_SECRET_ACCESS_KEY               R2 API token: secret access key
+# Required repository variable (not secret):
+#   R2_ACCOUNT_ID                      Cloudflare account id
+# Optional repository variables:
+#   R2_BUCKET                          bucket name (default "heardy-downloads")
 #   RELEASE_AS_DRAFT                   "true" (default when unset) keeps releases as drafts; set to "false" to publish
 #                                      tag pushes immediately.
 
@@ -134,11 +142,24 @@ jobs:
         if: always()
         shell: bash
         run: rm -f heardy-release-key.jks android/keystore.properties
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: android
-          path: dist/Heardy.apk
-          if-no-files-found: error
+      - name: Upload to R2 (staging)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET || 'heardy-downloads' }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET; do
+            if [ -z "${!v}" ]; then echo "::error::Missing secret or variable for $v"; exit 1; fi
+          done
+          aws s3 cp "dist/Heardy.apk" "s3://$R2_BUCKET/staging/$TAG/Heardy.apk"             --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"             --content-type "application/vnd.android.package-archive"
 
   windows:
     name: Windows installer
@@ -184,11 +205,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item build\windows\installer\Heardy-Setup.exe dist\Heardy-Setup.exe
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: windows
-          path: dist/Heardy-Setup.exe
-          if-no-files-found: error
+      - name: Upload to R2 (staging)
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET || 'heardy-downloads' }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET; do
+            if [ -z "${!v}" ]; then echo "::error::Missing secret or variable for $v"; exit 1; fi
+          done
+          aws s3 cp "dist/Heardy-Setup.exe" "s3://$R2_BUCKET/staging/$TAG/Heardy-Setup.exe"             --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"             --content-type "application/vnd.microsoft.portable-executable"
 
   release:
     name: Publish release
@@ -202,12 +236,34 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           sparse-checkout: docs
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          path: dist
-          merge-multiple: true
-      - name: List assets
-        run: ls -l dist
+      - name: Promote staged binaries in R2
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ACCOUNT_ID: ${{ vars.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET || 'heardy-downloads' }}
+          TAG: ${{ needs.check.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for v in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET; do
+            if [ -z "${!v}" ]; then echo "::error::Missing secret or variable for $v"; exit 1; fi
+          done
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          for f in Heardy.apk Heardy-Setup.exe; do
+            src="staging/$TAG/$f"
+            aws s3api head-object --bucket "$R2_BUCKET" --key "$src" --endpoint-url "$endpoint" > /dev/null
+            aws s3api copy-object --bucket "$R2_BUCKET" --copy-source "$R2_BUCKET/$src" --key "$f" --endpoint-url "$endpoint" > /dev/null
+            aws s3api copy-object --bucket "$R2_BUCKET" --copy-source "$R2_BUCKET/$src" --key "archive/$TAG/$f" --endpoint-url "$endpoint" > /dev/null
+            for dst in "$f" "archive/$TAG/$f"; do
+              size="$(aws s3api head-object --bucket "$R2_BUCKET" --key "$dst" --endpoint-url "$endpoint" --query ContentLength --output text)"
+              echo "$dst: $size bytes"
+            done
+            aws s3api delete-object --bucket "$R2_BUCKET" --key "$src" --endpoint-url "$endpoint" > /dev/null
+          done
       - name: Decide draft state
         id: draft
         env:
@@ -225,12 +281,19 @@ jobs:
           VERSION: ${{ needs.check.outputs.version }}
         run: |
           f="docs/release-notes-$VERSION.md"
+          out="$RUNNER_TEMP/release-notes.md"
           if [ -s "$f" ]; then
-            echo "path=$f" >> "$GITHUB_OUTPUT"
+            cp "$f" "$out"
           else
-            echo "Heardy $VERSION" > notes-fallback.md
-            echo "path=notes-fallback.md" >> "$GITHUB_OUTPUT"
+            echo "Heardy $VERSION" > "$out"
           fi
+          {
+            echo ""
+            echo "---"
+            echo "Descarga: https://vainastech.com/heardy/#descargas (los binarios ya no se adjuntan a esta release)."
+            echo "Download: https://vainastech.com/heardy/#descargas (binaries are no longer attached to this release)."
+          } >> "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           tag_name: ${{ needs.check.outputs.tag }}
@@ -239,7 +302,3 @@ jobs:
           draft: ${{ steps.draft.outputs.draft == 'true' }}
           body_path: ${{ steps.notes.outputs.path }}
           generate_release_notes: false
-          files: |
-            dist/Heardy.apk
-            dist/Heardy-Setup.exe
-          fail_on_unmatched_files: true

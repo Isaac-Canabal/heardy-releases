@@ -14,8 +14,8 @@ abstract class SystemNotifications {
   Future<void> show({required int id, required String title, required String body});
 
   /// Como [show], pero con dos botones tocables desde la propia
-  /// notificación: bajar el binario de esta plataforma directamente, o
-  /// revisar la página del release. Sólo tiene efecto en Android.
+  /// notificación: ir a la página de descargas del sitio, o
+  /// revisar las notas del release. Sólo tiene efecto en Android.
   Future<void> showUpdateAvailable({
     required int id,
     required String title,

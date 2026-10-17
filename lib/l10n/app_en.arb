@@ -357,7 +357,7 @@
   "notificationsUpdateTitle": "New version available: {name}",
   "@notificationsUpdateTitle": {"placeholders": {"name": {"type": "String"}}},
   "notificationsViewRelease": "View on GitHub",
-  "notificationsDownloadFromWebsite": "From the website",
+  "notificationsGoToDownloads": "Go to the downloads page",
   "notificationsDismiss": "Dismiss",
 
   "shareStatsButton": "Share",

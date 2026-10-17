@@ -2,16 +2,16 @@
 
 Heardy es un reproductor y biblioteca de música para Android y Windows. Trabaja sobre los archivos de audio que ya tenés en el dispositivo, los organiza en playlists, lee su metadata y los reproduce sin conexión. Además suma, de forma opcional, letras sincronizadas, estadísticas, cuenta con sincronización entre dispositivos, amigos, Explorar e importar desde un enlace; ninguna es necesaria para escuchar tu biblioteca.
 
-Este repositorio contiene el **código fuente de la app** y publica los binarios de cada versión como [Releases](../../releases).
+Este repositorio contiene el **código fuente de la app** y publica las notas de cada versión como [Releases](../../releases). Los binarios se descargan únicamente desde el sitio web.
 
 ## Descargas
 
-Siempre la última versión:
+Siempre la última versión, desde **[vainastech.com/heardy](https://vainastech.com/heardy/#descargas)**:
 
-- **Android**: [`Heardy.apk`](../../releases/latest/download/Heardy.apk). Al instalar fuera de una tienda, Android pide permitir "orígenes desconocidos" para el navegador o el gestor de archivos.
-- **Windows**: [`Heardy-Setup.exe`](../../releases/latest/download/Heardy-Setup.exe). El instalador no está firmado con certificado, así que SmartScreen avisa de "editor desconocido" la primera vez: *Más información → Ejecutar de todas formas*.
+- **Android**: `Heardy.apk`. Al instalar fuera de una tienda, Android pide permitir "orígenes desconocidos" para el navegador o el gestor de archivos.
+- **Windows**: `Heardy-Setup.exe`. El instalador no está firmado con certificado, así que SmartScreen avisa de "editor desconocido" la primera vez: *Más información → Ejecutar de todas formas*.
 
-Las releases se construyen automáticamente por GitHub Actions a partir de una etiqueta `vX.Y.Z` (ver `.github/workflows/release.yml`).
+Las releases de este repositorio llevan solo la etiqueta `vX.Y.Z` y las notas; los binarios ya no se adjuntan. Se construyen por GitHub Actions a partir de la etiqueta (ver `.github/workflows/release.yml`) y se suben a un almacenamiento propio desde el que los sirve el sitio.
 
 ## Capturas
 
