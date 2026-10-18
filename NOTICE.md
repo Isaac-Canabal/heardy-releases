@@ -1,5 +1,7 @@
 # Third-party notices
 
+Copyright (C) 2026 Isaac Canabal. All rights reserved except as granted by the GPL-3.0.
+
 Heardy is distributed under the GNU General Public License v3.0 (see `LICENSE`). It includes or links the following
 third-party components. This list is not exhaustive for transitive dependencies.
 

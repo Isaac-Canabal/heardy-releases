@@ -71,7 +71,7 @@ El detalle y las modificaciones están en [`NOTICE.md`](NOTICE.md). Heardy no es
 
 ## Licencia
 
-Heardy se distribuye bajo la **GNU General Public License v3.0**; ver [`LICENSE`](LICENSE). Incluye componentes de terceros con sus propias licencias; ver [`NOTICE.md`](NOTICE.md).
+Copyright (C) 2026 Isaac Canabal. Heardy se distribuye bajo la **GNU General Public License v3.0**; ver [`LICENSE`](LICENSE). Incluye componentes de terceros con sus propias licencias; ver [`NOTICE.md`](NOTICE.md).
 
 ## Nombre y marca
 
