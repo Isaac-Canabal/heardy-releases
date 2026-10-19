@@ -220,17 +220,20 @@ class ExploreProvider extends ChangeNotifier {
     final seeds = selectRadioSeedIds(urls);
     if (seeds.isEmpty) return const [];
     final lists = <List<RemoteTrack>>[];
-    Object? lastError;
     // En secuencia: son pocas semillas y cada una es una petición real al
     // servidor; en paralelo sólo ganaríamos unos segundos a costa de ráfaga.
     for (final seed in seeds) {
       try {
         lists.add(await _source.exploreRadio(seed));
       } catch (e) {
-        lastError = e;
+        // Si falla la primera, las demás fallarían igual: no se insiste y la
+        // estantería se oculta en vez de mostrar un error que reintenta en cada entrada.
+        if (lists.isEmpty) {
+          print('Explorar: la radio no está disponible (${e.runtimeType})');
+          return const [];
+        }
       }
     }
-    if (lists.isEmpty && lastError != null) throw lastError;
     final local = localVideoIds(await _db.getLocalSourceUrls());
     return mergeRadioTracks(lists, localVideoIds: local);
   }

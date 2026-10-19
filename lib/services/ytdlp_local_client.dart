@@ -84,6 +84,21 @@ List<String> ytdlpPlaylistArguments(String listId, int maxEntries) => [
       _playlistUrl(listId),
     ];
 
+/// El mix `RD<id>` solo se puede listar a través de la URL de reproducción:
+/// `playlist?list=RD…` responde "unviewable".
+String ytdlpRadioUrl(String seedVideoId) => 'https://www.youtube.com/watch?v=$seedVideoId&list=RD$seedVideoId';
+
+List<String> ytdlpRadioArguments(String seedVideoId, int maxEntries) => [
+      ..._commonArguments,
+      '--yes-playlist',
+      '--flat-playlist',
+      '--playlist-end',
+      '$maxEntries',
+      '-J',
+      '--',
+      ytdlpRadioUrl(seedVideoId),
+    ];
+
 const String ytdlpProgressPrefix = '[heardy] ';
 
 /// El AAC original tal cual (itag 140 o, si falta, otro M4A): sin `-x`, sin
@@ -288,6 +303,18 @@ class YtdlpLocalClient {
       timeout: playlistTimeout,
     );
     return playlistFromYtdlpJson(listId, stdout);
+  }
+
+  /// Mix de YouTube a partir de [seedVideoId]; la primera entrada suele ser la propia semilla.
+  Future<RemotePlaylist> radio(String seedVideoId, {int maxEntries = 25}) async {
+    if (!isValidYoutubeVideoId(seedVideoId)) {
+      throw const DownloadSourceException(DownloadSourceErrorKind.notFound, 'yt-dlp local: id inválido');
+    }
+    final stdout = await _invoke(
+      ytdlpRadioArguments(seedVideoId, maxEntries.clamp(1, maxPlaylistEntries)),
+      timeout: playlistTimeout,
+    );
+    return playlistFromYtdlpJson('RD$seedVideoId', stdout);
   }
 
   /// Descarga el M4A original de [videoId] a [destPath]. Si se cancela, mata

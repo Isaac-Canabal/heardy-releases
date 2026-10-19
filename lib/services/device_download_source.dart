@@ -2,10 +2,16 @@ import 'package:flutter/services.dart';
 import 'package:heardy_yt_stream/heardy_yt_stream.dart';
 
 import '../models/explore.dart';
+import 'app_log.dart';
 import 'device_range_downloader.dart';
 import 'download_source.dart';
 import 'stream_resolver.dart';
 import 'ytdlp_local_client.dart';
+
+const int deviceRadioMaxEntries = 25;
+
+/// Plazo de la radio en el dispositivo: pasado, se cae al servidor en vez de dejar la estantería cargando.
+const Duration deviceRadioTimeout = Duration(seconds: 25);
 
 String _watchUrl(String id) => 'https://www.youtube.com/watch?v=$id';
 
@@ -59,6 +65,9 @@ RemoteTrack remoteTrackFromYtVideoItem(YtVideoItem item) => RemoteTrack(
 abstract class DeviceBackend {
   Future<RemoteTrack> track(String urlOrId);
   Future<RemotePlaylist> playlist(String url);
+
+  /// Mix de YouTube sembrado con [seedVideoId] (la semilla puede venir incluida).
+  Future<List<RemoteTrack>> radio(String seedVideoId);
   Future<List<RemoteTrack>> search(String query, int limit);
   Future<void> fetchAudio(
     String videoId,
@@ -73,6 +82,8 @@ class AndroidDeviceBackend implements DeviceBackend {
   final Future<YtStreamResult> Function(String input) _resolve;
   final Future<List<YtVideoItem>> Function(String query, int limit) _search;
   final Future<YtPlaylist> Function(String url) _playlist;
+  // Un mix de YouTube no tiene fin: sin tope el plugin pediría páginas hasta reunir el máximo por defecto.
+  final Future<YtPlaylist> Function(String url, int maxEntries) _limitedPlaylist;
   final Future<StreamInfo> Function(String videoId) _resolveStream;
   final RangeDownloader _downloader;
 
@@ -80,11 +91,14 @@ class AndroidDeviceBackend implements DeviceBackend {
     Future<YtStreamResult> Function(String input)? resolve,
     Future<List<YtVideoItem>> Function(String query, int limit)? search,
     Future<YtPlaylist> Function(String url)? playlist,
+    Future<YtPlaylist> Function(String url, int maxEntries)? limitedPlaylist,
     Future<StreamInfo> Function(String videoId)? resolveStream,
     RangeDownloader? downloader,
   })  : _resolve = resolve ?? HeardyYtStream.resolve,
         _search = search ?? ((q, limit) => HeardyYtStream.search(q, limit: limit)),
         _playlist = playlist ?? ((url) => HeardyYtStream.playlist(url)),
+        _limitedPlaylist =
+            limitedPlaylist ?? ((url, max) => HeardyYtStream.playlist(url, maxEntries: max)),
         _resolveStream = resolveStream ?? _defaultResolveStream(resolve ?? HeardyYtStream.resolve),
         _downloader = downloader ?? RangeDownloader();
 
@@ -101,16 +115,20 @@ class AndroidDeviceBackend implements DeviceBackend {
     return remoteTrackFromYtStream(result, fallbackId: fallback ?? '');
   }
 
+  RemotePlaylist _asRemotePlaylist(YtPlaylist list) => RemotePlaylist(
+        id: list.id,
+        name: list.name.isEmpty ? 'Playlist' : list.name,
+        sourceUrl: list.url,
+        entries: list.entries.map(remoteTrackFromYtVideoItem).toList(),
+      );
+
   @override
-  Future<RemotePlaylist> playlist(String url) async {
-    final list = await _guardPlugin(() => _playlist(url));
-    return RemotePlaylist(
-      id: list.id,
-      name: list.name.isEmpty ? 'Playlist' : list.name,
-      sourceUrl: list.url,
-      entries: list.entries.map(remoteTrackFromYtVideoItem).toList(),
-    );
-  }
+  Future<RemotePlaylist> playlist(String url) async => _asRemotePlaylist(await _guardPlugin(() => _playlist(url)));
+
+  @override
+  Future<List<RemoteTrack>> radio(String seedVideoId) async =>
+      _asRemotePlaylist(await _guardPlugin(() => _limitedPlaylist(ytdlpRadioUrl(seedVideoId), deviceRadioMaxEntries)))
+          .entries;
 
   @override
   Future<List<RemoteTrack>> search(String query, int limit) async {
@@ -155,6 +173,10 @@ class WindowsDeviceBackend implements DeviceBackend {
   Future<RemotePlaylist> playlist(String url) => _client.playlist(url);
 
   @override
+  Future<List<RemoteTrack>> radio(String seedVideoId) async =>
+      (await _client.radio(seedVideoId, maxEntries: deviceRadioMaxEntries)).entries;
+
+  @override
   Future<List<RemoteTrack>> search(String query, int limit) => _client.search(query, limit: limit);
 
   @override
@@ -183,6 +205,9 @@ class UnavailableDeviceBackend implements DeviceBackend {
   Future<RemotePlaylist> playlist(String url) => Future.error(_error);
 
   @override
+  Future<List<RemoteTrack>> radio(String seedVideoId) => Future.error(_error);
+
+  @override
   Future<List<RemoteTrack>> search(String query, int limit) => Future.error(_error);
 
   @override
@@ -200,10 +225,15 @@ class UnavailableDeviceBackend implements DeviceBackend {
 class DeviceDownloadSource implements DownloadSource {
   final DeviceBackend _backend;
   final DownloadSource _explore;
+  final Duration _radioTimeout;
 
-  DeviceDownloadSource({required DeviceBackend backend, required DownloadSource explore})
-      : _backend = backend,
-        _explore = explore;
+  DeviceDownloadSource({
+    required DeviceBackend backend,
+    required DownloadSource explore,
+    Duration radioTimeout = deviceRadioTimeout,
+  })  : _backend = backend,
+        _explore = explore,
+        _radioTimeout = radioTimeout;
 
   @override
   Future<RemoteTrack> resolve(String url) => _backend.track(url);
@@ -259,7 +289,23 @@ class DeviceDownloadSource implements DownloadSource {
   Future<ExploreCollection> exploreAlbum(String browseId) => _explore.exploreAlbum(browseId);
 
   @override
-  Future<List<RemoteTrack>> exploreRadio(String seedVideoId) => _explore.exploreRadio(seedVideoId);
+  Future<List<RemoteTrack>> exploreRadio(String seedVideoId) async {
+    // La IP del servidor está bloqueada por YouTube en este endpoint: primero
+    // se intenta con la IP del propio usuario y el servidor queda de respaldo.
+    try {
+      final seen = <String>{seedVideoId};
+      final tracks = <RemoteTrack>[];
+      for (final t in await _backend.radio(seedVideoId).timeout(_radioTimeout)) {
+        if (t.durationSeconds <= 0 || !seen.add(t.id)) continue;
+        tracks.add(t);
+        if (tracks.length >= deviceRadioMaxEntries) break;
+      }
+      if (tracks.isNotEmpty) return tracks;
+    } catch (e) {
+      appLog('radio en el dispositivo falló: ${e.runtimeType}');
+    }
+    return _explore.exploreRadio(seedVideoId);
+  }
 
   @override
   Future<ExploreArtist> exploreArtist(String channelId) => _explore.exploreArtist(channelId);
