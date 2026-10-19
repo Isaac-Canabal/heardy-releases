@@ -805,6 +805,30 @@ class _ImportScreenState extends State<ImportScreen> {
               ),
             ],
           ),
+          if (spotify.isIncomplete) ...[
+            const SizedBox(height: 10),
+            Container(
+              key: const Key('spotify_incomplete_notice'),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orangeAccent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline_rounded, color: Colors.orangeAccent, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      l10n.importSpotifyIncomplete(spotify.itemsRead ?? spotify.tracks.length, spotify.expectedTotal!),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           // El resultado elegido en YouTube para cada pista se enseña
           // siempre acá, antes de descargar nada — nunca se resuelve en

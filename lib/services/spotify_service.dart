@@ -35,13 +35,24 @@ class SpotifyAnalysisResult {
   final String? thumbnailUrl;
   final List<SpotifyTrackInfo> tracks;
 
+  /// Ítems que Spotify dice que tiene la colección (`totalCount`), si se supo.
+  final int? expectedTotal;
+
+  /// Ítems realmente leídos, contando los no reproducibles que se descartaron.
+  final int? itemsRead;
+
   const SpotifyAnalysisResult({
     required this.type,
     required this.name,
     this.subtitle,
     this.thumbnailUrl,
     required this.tracks,
+    this.expectedTotal,
+    this.itemsRead,
   });
+
+  /// True si la lectura se cortó antes de traer todo lo que Spotify declara.
+  bool get isIncomplete => expectedTotal != null && (itemsRead ?? tracks.length) < expectedTotal!;
 
   bool get isSingleTrack => type == 'track';
   bool get isCollection => type == 'album' || type == 'playlist';
@@ -127,8 +138,26 @@ String? _pathfinderCover(Object? album) {
 /// JSON block that Next.js injects into the page. This contains full
 /// metadata (title, artist, duration, cover art) without requiring
 /// any API keys or authentication.
+typedef SpotifyPageFetcher = Future<SpotifyPlaylistPage?> Function(String playlistId, String token, int offset);
+
 class SpotifyService {
-  SpotifyService();
+  /// [pageFetcher], [thumbnailFetcher], [retryDelay] y [pageDelay] existen para
+  /// que los tests simulen fallos sin red ni esperas reales.
+  SpotifyService({
+    SpotifyPageFetcher? pageFetcher,
+    Future<String?> Function(String trackId)? thumbnailFetcher,
+    Duration Function(int attempt)? retryDelay,
+    Duration pageDelay = const Duration(milliseconds: 200),
+  })  : _retryDelay = retryDelay ?? ((attempt) => Duration(seconds: attempt)),
+        _pageDelay = pageDelay {
+    _pageFetcher = pageFetcher ?? _httpFetchPage;
+    _thumbnailFetcher = thumbnailFetcher ?? _httpFetchThumbnail;
+  }
+
+  late final SpotifyPageFetcher _pageFetcher;
+  late final Future<String?> Function(String trackId) _thumbnailFetcher;
+  final Duration Function(int attempt) _retryDelay;
+  final Duration _pageDelay;
 
   static final RegExp _spotifyUrlPattern = RegExp(
     r'(https?://)?(open\.spotify\.com|spotify\.link)/(intl-[a-z]{2}/)?(track|album|playlist)/([a-zA-Z0-9]+)',
@@ -345,13 +374,13 @@ class SpotifyService {
     final thumbnailUrl = _extractBestThumbnail(entity);
 
     final trackList = entity['trackList'] as List<dynamic>? ?? [];
-    final tracks = <SpotifyTrackInfo>[];
+    var tracks = <SpotifyTrackInfo>[];
 
     for (final trackData in trackList) {
       if (trackData is! Map<String, dynamic>) continue;
-      
+
       final trackTitle = trackData['title'] as String? ?? 'Sin título';
-      final trackArtist = trackData['subtitle'] as String? ?? 
+      final trackArtist = trackData['subtitle'] as String? ??
                            _extractArtists(trackData);
       final trackDuration = trackData['duration'] as int? ?? 0;
       final trackUri = trackData['uri'] as String?;
@@ -369,55 +398,49 @@ class SpotifyService {
       ));
     }
 
-    // For playlists, fetch track-specific thumbnails via oEmbed in parallel
-    if (type == 'playlist' && tracks.isNotEmpty) {
-      final client = HttpClient();
-      client.connectionTimeout = const Duration(seconds: 5);
-      try {
-        final futures = tracks.map((track) async {
-          try {
-            final trackId = track.spotifyUri?.split(':').last;
-            if (trackId != null) {
-              final oembedUrl = 'https://open.spotify.com/oembed?url=https://open.spotify.com/track/$trackId';
-              final request = await client.getUrl(Uri.parse(oembedUrl));
-              final response = await _withTimeout(
-                request.close(),
-                'La miniatura de "${track.title}"',
-              );
-              if (response.statusCode == 200) {
-                final body = await _withTimeout(
-                  response.transform(utf8.decoder).join(),
-                  'La miniatura de "${track.title}"',
-                );
-                final data = jsonDecode(body) as Map<String, dynamic>;
-                final trackThumbnail = data['thumbnail_url'] as String?;
-                if (trackThumbnail != null && trackThumbnail.isNotEmpty) {
-                  return SpotifyTrackInfo(
-                    title: track.title,
-                    artist: track.artist,
-                    durationMs: track.durationMs,
-                    thumbnailUrl: trackThumbnail,
-                    spotifyUri: track.spotifyUri,
-                  );
-                }
-              }
-            }
-          } catch (e) {
-            appLog('Error fetching oEmbed for track "${track.title}": $e');
-          }
-          return track; // fallback to original playlist cover
-        }).toList();
+    var itemsRead = trackList.length;
+    int? expectedTotal;
+    var usedPathfinder = false;
 
-        final resolvedTracks = await Future.wait(futures);
-        tracks.clear();
-        tracks.addAll(resolvedTracks);
-      } finally {
-        client.close();
+    // La embed corta las playlists en ~100 pistas (a veces 99, por eso no se
+    // condiciona al tamaño): se pagina siempre y se usa lo paginado si no
+    // trae menos que la embed.
+    if (playlistId != null && accessToken != null) {
+      final paged = await _fetchPlaylistPages(playlistId, accessToken);
+      if (paged != null) {
+        expectedTotal = paged.totalCount;
+        if (paged.tracks.length >= tracks.length) {
+          tracks = paged.tracks;
+          itemsRead = paged.itemsRead;
+          usedPathfinder = true;
+        }
       }
     }
 
-    if (playlistId != null && accessToken != null && trackList.length >= _embedTrackLimit) {
-      tracks.addAll(await _fetchRemainingPlaylistTracks(playlistId, accessToken, trackList.length));
+    // Una petición oEmbed por pista: sólo para las que siguen con la portada
+    // de la playlist (camino de la embed), nunca para las que ya traen la suya.
+    if (type == 'playlist' && tracks.isNotEmpty && !usedPathfinder) {
+      final resolvedTracks = await Future.wait(tracks.map((track) async {
+        try {
+          final trackId = track.spotifyUri?.split(':').last;
+          if (trackId != null) {
+            final trackThumbnail = await _thumbnailFetcher(trackId);
+            if (trackThumbnail != null && trackThumbnail.isNotEmpty) {
+              return SpotifyTrackInfo(
+                title: track.title,
+                artist: track.artist,
+                durationMs: track.durationMs,
+                thumbnailUrl: trackThumbnail,
+                spotifyUri: track.spotifyUri,
+              );
+            }
+          }
+        } catch (e) {
+          appLog('SpotifyService: miniatura no disponible (${e.runtimeType})');
+        }
+        return track; // fallback to original playlist cover
+      }));
+      tracks = resolvedTracks;
     }
 
     return SpotifyAnalysisResult(
@@ -426,66 +449,117 @@ class SpotifyService {
       subtitle: subtitle,
       thumbnailUrl: thumbnailUrl,
       tracks: tracks,
+      expectedTotal: expectedTotal,
+      itemsRead: itemsRead,
     );
   }
 
-  /// La página embed corta las playlists en 100 pistas.
-  static const int _embedTrackLimit = 100;
+  /// Variante sin red del análisis de una colección, para tests.
+  Future<SpotifyAnalysisResult> parseCollection(
+    Map<String, dynamic> entity,
+    String type, {
+    String? playlistId,
+    String? accessToken,
+  }) =>
+      _parseCollection(entity, type, playlistId: playlistId, accessToken: accessToken);
+
   static const int _maxPlaylistTracks = 10000;
   static const int _pathfinderPageSize = 100;
+  static const int _pageAttempts = 3;
 
   /// Hash de la consulta persistida `fetchPlaylist` del reproductor web. No
   /// es una API pública: cuando Spotify despliega una versión nueva el hash
-  /// puede dejar de valer, y entonces la playlist se queda en las primeras
-  /// 100 pistas en vez de fallar.
+  /// puede dejar de valer, y entonces se usa la lista de la embed en vez de
+  /// fallar.
   static const String _fetchPlaylistHash = '19ff1327c29e99c208c86d7a9d8f1929cfdf3d3202a0ff4253c821f1901aa94d';
 
-  /// Pide a `pathfinder`, con el token anónimo de la página embed, las pistas
-  /// desde [offset]. Ante cualquier fallo se queda con lo que ya tenía.
-  Future<List<SpotifyTrackInfo>> _fetchRemainingPlaylistTracks(String playlistId, String token, int offset) async {
+  /// Pagina `pathfinder` desde el offset 0. Cada página tiene hasta
+  /// [_pageAttempts] intentos; si una se agota se devuelve lo leído hasta ahí
+  /// (con `totalCount` para que el llamador sepa que quedó incompleto). Null
+  /// sólo si la primera página no se pudo leer.
+  Future<({List<SpotifyTrackInfo> tracks, int itemsRead, int totalCount})?> _fetchPlaylistPages(
+    String playlistId,
+    String token,
+  ) async {
     final result = <SpotifyTrackInfo>[];
+    var offset = 0;
+    int? total;
+    while (total == null || (offset < total && offset < _maxPlaylistTracks)) {
+      final page = await _fetchPageWithRetry(playlistId, token, offset);
+      if (page == null || page.itemCount == 0) break;
+      result.addAll(page.tracks);
+      total = page.totalCount;
+      offset += page.itemCount;
+      if (offset < total && _pageDelay > Duration.zero) await Future<void>.delayed(_pageDelay);
+    }
+    if (total == null) return null;
+    return (tracks: result, itemsRead: offset, totalCount: total);
+  }
+
+  Future<SpotifyPlaylistPage?> _fetchPageWithRetry(String playlistId, String token, int offset) async {
+    for (var attempt = 1; attempt <= _pageAttempts; attempt++) {
+      try {
+        final page = await _pageFetcher(playlistId, token, offset);
+        if (page != null) return page;
+        appLog('SpotifyService: página vacía o con formato inesperado (intento $attempt)');
+      } catch (e) {
+        appLog('SpotifyService: fallo al leer una página (${e.runtimeType}, intento $attempt)');
+      }
+      if (attempt < _pageAttempts) await Future<void>.delayed(_retryDelay(attempt));
+    }
+    return null;
+  }
+
+  /// Pide a `pathfinder`, con el token anónimo de la página embed, una página
+  /// de pistas. Lanza ante timeout, error de conexión o respuesta no 200; un
+  /// cliente nuevo por página evita reusar una conexión que Spotify ya cerró.
+  Future<SpotifyPlaylistPage?> _httpFetchPage(String playlistId, String token, int offset) async {
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 15);
     try {
-      var total = _maxPlaylistTracks;
-      while (offset < total && offset < _maxPlaylistTracks) {
-        final request = await client.postUrl(Uri.parse('https://api-partner.spotify.com/pathfinder/v2/query'));
-        request.headers.set('Authorization', 'Bearer $token');
-        request.headers.set('App-Platform', 'WebPlayer');
-        request.headers.contentType = ContentType.json;
-        request.write(jsonEncode({
-          'operationName': 'fetchPlaylist',
-          'variables': {
-            'uri': 'spotify:playlist:$playlistId',
-            'offset': offset,
-            'limit': _pathfinderPageSize,
-            'enableWatchFeedEntrypoint': false,
-          },
-          'extensions': {
-            'persistedQuery': {'version': 1, 'sha256Hash': _fetchPlaylistHash},
-          },
-        }));
-        final response = await _withTimeout(request.close(), 'La lista de Spotify');
-        final body = await _withTimeout(response.transform(utf8.decoder).join(), 'La lista de Spotify');
-        if (response.statusCode != 200) {
-          appLog('SpotifyService: pathfinder respondió ${response.statusCode} en offset $offset');
-          break;
-        }
-        final page = parsePathfinderPlaylistPage(jsonDecode(body));
-        if (page == null || page.itemCount == 0) {
-          appLog('SpotifyService: formato inesperado de pathfinder en offset $offset');
-          break;
-        }
-        result.addAll(page.tracks);
-        total = page.totalCount;
-        offset += page.itemCount;
+      final request = await client.postUrl(Uri.parse('https://api-partner.spotify.com/pathfinder/v2/query'));
+      request.headers.set('Authorization', 'Bearer $token');
+      request.headers.set('App-Platform', 'WebPlayer');
+      request.headers.contentType = ContentType.json;
+      request.write(jsonEncode({
+        'operationName': 'fetchPlaylist',
+        'variables': {
+          'uri': 'spotify:playlist:$playlistId',
+          'offset': offset,
+          'limit': _pathfinderPageSize,
+          'enableWatchFeedEntrypoint': false,
+        },
+        'extensions': {
+          'persistedQuery': {'version': 1, 'sha256Hash': _fetchPlaylistHash},
+        },
+      }));
+      final response = await _withTimeout(request.close(), 'La lista de Spotify');
+      final body = await _withTimeout(response.transform(utf8.decoder).join(), 'La lista de Spotify');
+      if (response.statusCode != 200) {
+        throw HttpException('pathfinder ${response.statusCode}');
       }
-    } catch (e) {
-      appLog('SpotifyService: no se pudieron leer más pistas (${e.runtimeType})');
+      return parsePathfinderPlaylistPage(jsonDecode(body));
     } finally {
-      client.close();
+      client.close(force: true);
     }
-    return result;
+  }
+
+  Future<String?> _httpFetchThumbnail(String trackId) async {
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 5);
+    try {
+      final request = await client.getUrl(
+          Uri.parse('https://open.spotify.com/oembed?url=https://open.spotify.com/track/$trackId'));
+      final response = await _withTimeout(request.close(), 'La miniatura');
+      if (response.statusCode != 200) {
+        await response.drain<void>();
+        return null;
+      }
+      final body = await _withTimeout(response.transform(utf8.decoder).join(), 'La miniatura');
+      return (jsonDecode(body) as Map<String, dynamic>)['thumbnail_url'] as String?;
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// Extracts artist name(s) from the entity data.

@@ -221,6 +221,7 @@
   "importAlreadyInWaitlistSnack": "Already in the waiting list",
   "importSongsQueuedSnack": "{count, plural, one{1 song queued} other{{count} songs queued}}",
   "importSpotifySkippedSuffix": " · {skipped} without a good match",
+  "importSpotifyIncomplete": "Loaded {loaded} of {total} Spotify songs. Analyze the link again to try to get the rest.",
   "importMatchingProgress": "Searching YouTube: {done} of {total}",
   "importNoFolderTitle": "Pick a library folder first",
   "importNoFolderBody": "Downloads are saved there, same as files you import by hand. Set it up in Settings.",

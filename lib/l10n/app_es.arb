@@ -339,6 +339,10 @@
   "@importSpotifySkippedSuffix": {
     "placeholders": {"skipped": {"type": "int"}}
   },
+  "importSpotifyIncomplete": "Se cargaron {loaded} de {total} canciones de Spotify. Vuelve a analizar el enlace para intentar traer el resto.",
+  "@importSpotifyIncomplete": {
+    "placeholders": {"loaded": {"type": "int"}, "total": {"type": "int"}}
+  },
   "importMatchingProgress": "Buscando en YouTube: {done} de {total}",
   "@importMatchingProgress": {
     "placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}
