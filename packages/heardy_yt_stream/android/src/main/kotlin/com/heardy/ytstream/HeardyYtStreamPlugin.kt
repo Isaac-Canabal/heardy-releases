@@ -189,9 +189,9 @@ class HeardyYtStreamPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         private const val CODE_PO_TOKEN = "po_token_failed"
         private const val CODE_INVALID_URL = "invalid_url"
         private const val DEFAULT_SEARCH_LIMIT = 20
-        private const val MAX_SEARCH_LIMIT = 100
-        private const val MAX_SEARCH_PAGES = 3
-        private const val MAX_PLAYLIST_ENTRIES = 500
+        private const val MAX_SEARCH_LIMIT = 200
+        private const val MAX_SEARCH_PAGES = 5
+        private const val MAX_PLAYLIST_ENTRIES = 10000
         private val VIDEO_ID = Regex("^[A-Za-z0-9_-]{11}$")
 
         @Volatile

@@ -75,3 +75,41 @@ Future<SpotifyMatch> matchSpotifyTrack(
     durationDiffSeconds: (best.durationSeconds - track.durationSeconds).abs(),
   );
 }
+
+/// Empareja [tracks] con [concurrency] búsquedas a la vez y conserva el orden.
+///
+/// Una búsqueda que falla cuenta como "sin coincidencia" para no perder una
+/// lista de cientos de pistas por un fallo suelto; si fallan
+/// [maxConsecutiveFailures] seguidas (sin red, bloqueo de YouTube) se relanza
+/// el error, porque seguir sólo produciría una lista vacía.
+Future<List<SpotifyMatch>> matchSpotifyTracks(
+  List<SpotifyTrackInfo> tracks,
+  DownloadSource source, {
+  int concurrency = 3,
+  int maxConsecutiveFailures = 5,
+  void Function(int done, int total)? onProgress,
+}) async {
+  final results = List<SpotifyMatch?>.filled(tracks.length, null);
+  var next = 0;
+  var done = 0;
+  var consecutiveFailures = 0;
+  Object? fatal;
+
+  Future<void> worker() async {
+    while (fatal == null && next < tracks.length) {
+      final i = next++;
+      try {
+        results[i] = await matchSpotifyTrack(tracks[i], source);
+        consecutiveFailures = 0;
+      } on DownloadSourceException catch (e) {
+        results[i] = SpotifyMatch(original: tracks[i], youtubeTrack: null, durationDiffSeconds: null);
+        if (++consecutiveFailures >= maxConsecutiveFailures) fatal ??= e;
+      }
+      onProgress?.call(++done, tracks.length);
+    }
+  }
+
+  await Future.wait([for (var w = 0; w < concurrency; w++) worker()]);
+  if (fatal != null) throw fatal!;
+  return [for (final r in results) r!];
+}

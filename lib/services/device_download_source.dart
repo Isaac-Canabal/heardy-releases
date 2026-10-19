@@ -232,10 +232,6 @@ class DeviceDownloadSource implements DownloadSource {
         detail: 'Las descargas se hacen en este dispositivo',
       );
 
-  /// Sin servidor no hay cupo: [UsageStatus.disabled] es "sin límite" y la UI no pinta nada.
-  @override
-  Future<UsageStatus> usage() async => UsageStatus.disabled;
-
   @override
   Future<List<ExploreShelf>> exploreHome({String? country, bool fresh = false}) =>
       _explore.exploreHome(country: country, fresh: fresh);

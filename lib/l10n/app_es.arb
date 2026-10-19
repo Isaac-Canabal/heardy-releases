@@ -59,7 +59,7 @@
   "settingsChooseFolder": "Elegir carpeta",
   "settingsSectionSearch": "Búsqueda",
   "settingsMaxResults": "Resultados máximos",
-  "settingsMaxResultsBody": "Número de resultados a mostrar en búsquedas (10-100)",
+  "settingsMaxResultsBody": "Número de resultados a mostrar en búsquedas (10-200)",
   "supportSectionTitle": "Apoya el servidor",
   "supportBody": "Las descargas se hacen en tu dispositivo, pero el servidor de Explorar, amigos y sincronización tiene un costo. Heardy no tiene ánimo de lucro: todo lo que se recibe por donaciones se destina únicamente a cubrir el servidor. Es totalmente opcional: nada se bloquea.",
   "supportButton": "Apoyar con una donación",
@@ -339,9 +339,9 @@
   "@importSpotifySkippedSuffix": {
     "placeholders": {"skipped": {"type": "int"}}
   },
-  "importBatchCappedSuffix": " · solo se añadieron las primeras {max}",
-  "@importBatchCappedSuffix": {
-    "placeholders": {"max": {"type": "int"}}
+  "importMatchingProgress": "Buscando en YouTube: {done} de {total}",
+  "@importMatchingProgress": {
+    "placeholders": {"done": {"type": "int"}, "total": {"type": "int"}}
   },
   "importNoFolderTitle": "Elige primero una carpeta de biblioteca",
   "importNoFolderBody": "Las descargas se guardan ahí, igual que los archivos que importas a mano. Configúralo en Ajustes.",
@@ -543,7 +543,6 @@
   "dlExtraction": "No se pudo obtener el audio en este momento. Se reintentará solo; si sigue fallando, inténtalo más tarde.",
   "dlNotFound": "Ese contenido no se puede descargar (borrado, privado, restringido, en directo o demasiado largo).",
   "dlUnsupportedMedia": "Ese vídeo no tiene una pista de audio compatible.",
-  "dlDailyQuota": "Has llegado a tu cupo de descargas. Vuelve más tarde.",
   "dlAntiBot": "El origen bloqueó temporalmente las descargas desde este dispositivo. Se reintentará solo más tarde.",
   "dlCapacity": "Los servidores han agotado su capacidad de este mes. Vuelve a intentarlo más adelante.",
   "dlSongTooLong": "Esta canción es demasiado larga para descargarla.",
@@ -572,7 +571,6 @@
   "errorRateLimited": "Estás haciendo demasiadas acciones seguidas. Espera un momento e inténtalo de nuevo.",
   "errorAuthUnavailable": "No se pudo comprobar tu sesión ahora mismo. Se reintentará en unos segundos.",
   "errorServerNotReady": "El servidor todavía no está listo. Inténtalo de nuevo más tarde.",
-  "errorDownloadsMoved": "Esta versión de Heardy ya no descarga desde el servidor. Actualiza la aplicación para seguir descargando.",
   "spotifyUrlInvalid": "Ese enlace no es válido. Comprueba que lo copiaste completo.",
   "spotifyDataMissing": "No se pudieron obtener los datos del enlace. El enlace puede ser privado o no válido.",
   "spotifyTypeUnsupported": "Ese tipo de enlace no se puede descargar todavía.",
@@ -688,9 +686,7 @@
   "@cloudLibDownloadAll": {"placeholders": {"count": {"type": "int"}}},
   "cloudLibConfirmTitle": "Descargar {count} canciones",
   "@cloudLibConfirmTitle": {"placeholders": {"count": {"type": "int"}}},
-  "cloudLibConfirmBody": "Se añadirán a la cola de descargas y llegarán a la Bandeja. Cuentan para tu cupo de descargas.",
-  "cloudLibConfirmCap": "Se descargan como máximo {max} de una vez; vuelve a tocar el botón para el resto.",
-  "@cloudLibConfirmCap": {"placeholders": {"max": {"type": "int"}}},
+  "cloudLibConfirmBody": "Se añadirán a la cola de descargas y llegarán a la Bandeja.",
   "cloudLibQueuedSnack": "{count} canciones en cola",
   "@cloudLibQueuedSnack": {"placeholders": {"count": {"type": "int"}}},
   "cloudLibNoMatch": "No se encontró una coincidencia fiable para esta canción.",

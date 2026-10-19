@@ -206,13 +206,6 @@ class YtdlpServerSource implements DownloadSource {
       case 401:
       case 403:
         throw DownloadSourceException(DownloadSourceErrorKind.unauthorized, detail, statusCode: statusCode, reason: reason);
-      case 410:
-        throw DownloadSourceException(
-          DownloadSourceErrorKind.serviceUnavailable,
-          detail,
-          statusCode: statusCode,
-          reason: reason,
-        );
       case 451:
         throw DownloadSourceException(DownloadSourceErrorKind.blockedLegal, detail, statusCode: statusCode, reason: reason);
       case 415:
@@ -236,17 +229,8 @@ class YtdlpServerSource implements DownloadSource {
       case 429:
         // El propio servidor se autolimitó (no YouTube): distinto de un 502
         // porque acá sí sabemos, con certeza, cuánto hay que esperar.
-        //
-        // Dos motivos posibles, distinguidos por `reason` en el cuerpo
-        // (Fase 3 del plan de seguridad): el límite de PETICIONES de
-        // `rate_limit.py` (sin `reason`, protección anti-abuso) o el cupo
-        // diario de CANCIONES por cuenta (`reason: "daily_song_quota"`, un
-        // límite de producto — "llegaste a tus 150 de hoy" merece su propio
-        // mensaje, no el genérico de arriba).
         throw DownloadSourceException(
-          (reason == 'daily_song_quota' || reason == 'monthly_song_quota')
-              ? DownloadSourceErrorKind.dailyQuotaExceeded
-              : DownloadSourceErrorKind.quotaExceeded,
+          DownloadSourceErrorKind.quotaExceeded,
           detail,
           retryAfterSeconds: int.tryParse((retryAfterHeader ?? '').trim()),
           statusCode: statusCode,
@@ -617,27 +601,6 @@ class YtdlpServerSource implements DownloadSource {
             : 'No se pudo contactar con el servidor',
         problem: e is TimeoutException ? DownloadProbeProblem.timeout : DownloadProbeProblem.unreachable,
       );
-    } finally {
-      client.close();
-    }
-  }
-
-  @override
-  Future<UsageStatus> usage() async {
-    if (_normalizedBase() == null) return UsageStatus.disabled;
-    final client = _clientFactory();
-    try {
-      final response = await client
-          .get(_uri('/usage'), headers: await _headers())
-          .timeout(const Duration(seconds: 10));
-      if (response.statusCode != 200) return UsageStatus.disabled;
-      final json = jsonDecode(utf8.decode(response.bodyBytes)) as Map<String, dynamic>;
-      return UsageStatus.fromJson(json);
-    } catch (_) {
-      // No lanza a propósito (ver el doc de DownloadSource.usage): un fallo
-      // acá se ve exactamente igual que "no hay cupo activo", y ninguno de
-      // los dos amerita bloquear la pantalla de Añadir por esto.
-      return UsageStatus.disabled;
     } finally {
       client.close();
     }

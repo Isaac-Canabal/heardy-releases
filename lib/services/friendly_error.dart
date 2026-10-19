@@ -146,7 +146,6 @@ String downloadErrorCode(DownloadSourceErrorKind kind, {int? statusCode}) {
     DownloadSourceErrorKind.notFound => 'NF',
     DownloadSourceErrorKind.unsupportedMedia => 'MEDIA',
     DownloadSourceErrorKind.quotaExceeded => 'QUOTA',
-    DownloadSourceErrorKind.dailyQuotaExceeded => 'DQUOTA',
     DownloadSourceErrorKind.antiBotBlocked => 'BOT',
     DownloadSourceErrorKind.serviceUnavailable => 'UNAVAIL',
     DownloadSourceErrorKind.serverCapacityExhausted => 'CAP',
@@ -163,9 +162,6 @@ String _formatWait(int seconds) {
   final minutes = (seconds / 60).ceil();
   return minutes == 1 ? '1 minuto' : '$minutes minutos';
 }
-
-const _downloadsMovedMessage =
-    'Esta versión de Heardy ya no descarga desde el servidor. Actualiza la aplicación para seguir descargando.';
 
 String downloadErrorMessage(
   DownloadSourceErrorKind kind, {
@@ -201,15 +197,12 @@ String downloadErrorMessage(
       return retryAfterSeconds != null && retryAfterSeconds >= 60
           ? 'El servidor está ocupado. Se reintentará en ${_formatWait(retryAfterSeconds)}.'
           : 'El servidor está ocupado, reintentando en unos segundos.';
-    case DownloadSourceErrorKind.dailyQuotaExceeded:
-      return safeServerText(serverText) ?? 'Has llegado a tu cupo de descargas. Vuelve más tarde.';
     case DownloadSourceErrorKind.antiBotBlocked:
       return 'YouTube limitó temporalmente las descargas desde este dispositivo. Se reintentará solo más tarde.';
     case DownloadSourceErrorKind.serviceUnavailable:
       if (reason == 'auth_unavailable') {
         return 'No se pudo comprobar tu sesión ahora mismo. Se reintentará en unos segundos.';
       }
-      if (reason == 'downloads_moved_to_device') return _downloadsMovedMessage;
       if (reason == 'not_configured') return 'El servidor todavía no está listo. Inténtalo de nuevo más tarde.';
       return 'El servicio no está disponible ahora mismo. Inténtalo en unos minutos.';
     case DownloadSourceErrorKind.serverCapacityExhausted:
@@ -538,8 +531,6 @@ String localizedDownloadMessage(
       return l10n.dlUnsupportedMedia;
     case DownloadSourceErrorKind.quotaExceeded:
       return reason == 'rate_limited' ? l10n.errorRateLimited : _busyMessage(l10n, retryAfterSeconds);
-    case DownloadSourceErrorKind.dailyQuotaExceeded:
-      return (isEs ? safeServerText(serverText) : null) ?? l10n.dlDailyQuota;
     case DownloadSourceErrorKind.antiBotBlocked:
       return l10n.dlAntiBot;
     case DownloadSourceErrorKind.serviceUnavailable:
@@ -558,7 +549,6 @@ String localizedDownloadMessage(
 String _unavailableMessage(AppLocalizations l10n, String? reason) => switch (reason) {
       'auth_unavailable' => l10n.errorAuthUnavailable,
       'not_configured' => l10n.errorServerNotReady,
-      'downloads_moved_to_device' => l10n.errorDownloadsMoved,
       _ => l10n.errorServiceUnavailable,
     };
 

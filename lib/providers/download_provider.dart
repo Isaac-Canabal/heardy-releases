@@ -107,7 +107,7 @@ class PendingImport {
 }
 
 /// Un trabajo que se dio por perdido, para que la UI pueda contarlo. También
-/// se usa para avisar de una espera por cuota (ver [retryAfterSeconds]),
+/// se usa para avisar de una espera (ver [retryAfterSeconds]),
 /// donde el trabajo NO se pierde — sigue en la cola y se reintentará solo.
 class DownloadFailure {
   final String title;
@@ -119,11 +119,11 @@ class DownloadFailure {
 
   /// True si el vídeo no va a poder descargarse nunca (borrado, privado, sin
   /// pista AAC). False si simplemente se agotaron los reintentos, o si es un
-  /// aviso de cuota ([retryAfterSeconds] no nulo) — en ese caso el trabajo
+  /// aviso de espera ([retryAfterSeconds] no nulo) — en ese caso el trabajo
   /// sigue en la cola, no se descartó nada.
   final bool permanent;
 
-  /// No nulo solo para los avisos de [DownloadSourceErrorKind.quotaExceeded]:
+  /// No nulo solo para los avisos de espera (red caída, muro anti-bot):
   /// cuántos segundos exactos va a esperar el trabajo antes de reintentar
   /// solo. Distingue "estamos esperando nuestro turno" (esto) de "se rindió"
   /// (permanent) o "se agotaron los reintentos" (ninguno de los dos).
@@ -155,11 +155,6 @@ enum DownloadPhase { idle, resolving, preparing, downloading, saving }
 /// **Decide qué descargar y cuándo; el cómo es de [DownloadService].** No
 /// conoce el servidor ni HTTP: todo pasa por [DownloadSource]. Cambiar de
 /// proveedor no debería obligar a tocar este archivo.
-/// Máximo de pistas que se encolan de una sola playlist de YouTube/Spotify.
-const int maxPlaylistBatch = 150;
-
-bool exceedsPlaylistBatch(int total) => total > maxPlaylistBatch;
-
 class DownloadProvider extends ChangeNotifier {
   /// Presupuesto duro por trabajo. Vive en la base (`download_queue.attempts`)
   /// y no en memoria, para que reiniciar la app no lo regale.
@@ -175,18 +170,6 @@ class DownloadProvider extends ChangeNotifier {
     Duration(seconds: 15),
     Duration(seconds: 45),
   ];
-
-  /// Sólo por si el servidor respondiera 429 sin `Retry-After` (no debería
-  /// pasar nunca: `rate_limit.py` siempre lo calcula) — un valor defensivo
-  /// razonable, no una cifra que se le vaya a mostrar al usuario como si
-  /// fuera exacta.
-  static const int _defaultQuotaWaitSeconds = 300;
-
-  /// Sólo por si el 429 del cupo diario llegara sin `Retry-After` (no
-  /// debería pasar: `quota.py:seconds_until_next_day` siempre lo calcula) —
-  /// 1 hora es un valor defensivo cualquiera, nunca lo que se le muestra al
-  /// usuario (eso sale de `error.userMessage`, redactado por el servidor).
-  static const int _defaultDailyQuotaWaitSeconds = 3600;
 
   /// Cuánto esperar antes de reintentar un trabajo que falló por
   /// [DownloadSourceErrorKind.network] (el servidor no respondió en
@@ -326,8 +309,7 @@ class DownloadProvider extends ChangeNotifier {
     required String playlistId,
   }) async {
     var added = 0;
-    final limit = playlist.entries.length < maxPlaylistBatch ? playlist.entries.length : maxPlaylistBatch;
-    for (var i = 0; i < limit; i++) {
+    for (var i = 0; i < playlist.entries.length; i++) {
       final entry = playlist.entries[i];
       final ok = await _db.enqueueDownload(
         sourceType: 'youtube',
@@ -393,12 +375,10 @@ class DownloadProvider extends ChangeNotifier {
   /// propio: este proyecto ya evita temporizadores que solo existen para
   /// preguntar "¿ya volviste?" (ver `processQueue`).
   ///
-  /// Se detiene en el primer [DownloadSourceErrorKind.network],
-  /// [DownloadSourceErrorKind.quotaExceeded], [DownloadSourceErrorKind.
-  /// dailyQuotaExceeded] o [DownloadSourceErrorKind.antiBotBlocked]: los
-  /// cuatro significan "seguimos sin poder resolver nada de verdad todavía"
-  /// (servidor apagado, límite de peticiones, cupo diario agotado, o el muro
-  /// anti-bot de YouTube), así que insistir con el resto de la lista en la
+  /// Se detiene en el primer [DownloadSourceErrorKind.network] o
+  /// [DownloadSourceErrorKind.antiBotBlocked]: ambos significan "seguimos sin
+  /// poder resolver nada de verdad todavía" (sin red, o el muro anti-bot de
+  /// YouTube), así que insistir con el resto de la lista en la
   /// misma pasada sólo repetiría el mismo fallo. Cualquier otro error (404,
   /// formato no soportado, etc.) sí es definitivo para esa URL puntual — se
   /// descarta y se registra como un fallo más, igual que un trabajo de la
@@ -419,8 +399,6 @@ class DownloadProvider extends ChangeNotifier {
         await _db.removePendingImport(pending.id);
       } on DownloadSourceException catch (e) {
         if (e.kind == DownloadSourceErrorKind.network ||
-            e.kind == DownloadSourceErrorKind.quotaExceeded ||
-            e.kind == DownloadSourceErrorKind.dailyQuotaExceeded ||
             e.kind == DownloadSourceErrorKind.antiBotBlocked ||
             e.kind == DownloadSourceErrorKind.serviceUnavailable ||
             e.kind == DownloadSourceErrorKind.serverCapacityExhausted) {
@@ -708,8 +686,7 @@ class DownloadProvider extends ChangeNotifier {
       DownloadSourceErrorKind.network => maxNetworkReschedules,
       DownloadSourceErrorKind.antiBotBlocked ||
       DownloadSourceErrorKind.serviceUnavailable ||
-      DownloadSourceErrorKind.serverCapacityExhausted ||
-      DownloadSourceErrorKind.quotaExceeded =>
+      DownloadSourceErrorKind.serverCapacityExhausted =>
         maxFreeReschedules,
       _ => null,
     };
@@ -740,7 +717,7 @@ class DownloadProvider extends ChangeNotifier {
     }
 
     if (error.kind == DownloadSourceErrorKind.antiBotBlocked) {
-      // Mismo trato que `network`/`quotaExceeded`: no es un fallo del
+      // Mismo trato que `network`: no es un fallo del
       // trabajo, así que no gasta `attempts`. La diferencia con `network` es
       // sólo cuánto se espera — ver _antiBotBlockWaitSeconds.
       final wait = const Duration(seconds: _antiBotBlockWaitSeconds);
@@ -764,35 +741,6 @@ class DownloadProvider extends ChangeNotifier {
       // responde sin tocar la red, y sondea uno cada tanto por si se amplió
       // la cuota antes), así que basta una espera corta.
       const wait = Duration(minutes: 15);
-      _retryAfter[job.queueId] = DateTime.now().add(wait);
-      _recordFailure(job, error.userMessage, error: error, code: error.code, permanent: false, retryAfterSeconds: wait.inSeconds);
-      await refreshQueue();
-      return;
-    }
-
-    if (error.kind == DownloadSourceErrorKind.quotaExceeded) {
-      // El límite de peticiones del propio servidor no es un fallo del
-      // trabajo: es el servidor pidiendo que se espere un tiempo que él
-      // mismo calculó con exactitud. No cuenta contra `maxAttempts` — a
-      // diferencia de un vídeo bloqueado o una red caída, reintentar tras la
-      // cuota casi seguro funciona, así que tratarlo como un fallo normal
-      // lo tiraría de la cola sin necesidad (y el trabajo NUNCA se elimina
-      // aquí, sólo se reprograma).
-      final wait = Duration(seconds: error.retryAfterSeconds ?? _defaultQuotaWaitSeconds);
-      _retryAfter[job.queueId] = DateTime.now().add(wait);
-      _recordFailure(job, error.userMessage, error: error, code: error.code, permanent: false, retryAfterSeconds: wait.inSeconds);
-      await refreshQueue();
-      return;
-    }
-
-    if (error.kind == DownloadSourceErrorKind.dailyQuotaExceeded) {
-      // Mismo trato que quotaExceeded — no consume attempts, se reprograma —
-      // pero la espera es "hasta la medianoche UTC siguiente" (calculada por
-      // el servidor, en retryAfterSeconds) en vez de minutos: es un cupo de
-      // producto, no una ventana anti-abuso corta. El resto de la cola no
-      // se aborta: otro trabajo puede pertenecer a otra cuenta con cupo
-      // propio (poco común en este cliente, pero nada lo impide).
-      final wait = Duration(seconds: error.retryAfterSeconds ?? _defaultDailyQuotaWaitSeconds);
       _retryAfter[job.queueId] = DateTime.now().add(wait);
       _recordFailure(job, error.userMessage, error: error, code: error.code, permanent: false, retryAfterSeconds: wait.inSeconds);
       await refreshQueue();

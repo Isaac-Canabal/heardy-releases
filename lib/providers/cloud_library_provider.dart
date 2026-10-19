@@ -130,13 +130,11 @@ class CloudLibraryProvider extends ChangeNotifier {
     }
   }
 
-  /// Encola las que tienen enlace, hasta [limit]; las que no lo tienen se
-  /// piden una a una (cada una gasta una búsqueda). Devuelve cuántas se
-  /// encolaron.
-  Future<int> downloadAll({int limit = maxPlaylistBatch}) async {
+  /// Encola las que tienen enlace; las que no lo tienen se piden una a una
+  /// (cada una gasta una búsqueda). Devuelve cuántas se encolaron.
+  Future<int> downloadAll() async {
     var count = 0;
     for (final entry in entries) {
-      if (count >= limit) break;
       if (!entry.hasLink || entry.queued) continue;
       final track = remoteTrackFromCloudSong(entry.song);
       if (track == null) continue;

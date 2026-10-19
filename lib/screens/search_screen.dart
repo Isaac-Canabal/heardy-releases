@@ -110,14 +110,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
     });
   }
 
-  List<Song> _matches(int maxResults) {
-    if (_query.isEmpty) return const [];
-    final q = _query.toLowerCase();
-    final matches = _allSongs
-        .where((s) => s.title.toLowerCase().contains(q) || s.artist.toLowerCase().contains(q))
-        .toList();
-    return matches.length > maxResults ? matches.sublist(0, maxResults) : matches;
-  }
+  List<Song> _matches() => localSearchMatches(_allSongs, _query);
 
   Future<void> _play(Song song, List<Song> results) async {
     DesktopShellScope.maybeOf(context)?.openNowPlaying();
@@ -206,7 +199,6 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
 
   @override
   Widget build(BuildContext context) {
-    final maxResults = context.watch<SettingsProvider>().maxSearchResults;
     final audioHandler = context.watch<AudioPlayerHandler>();
     final libraryVersion = context.watch<MusicProvider>().librarySongsVersion;
     final l10n = AppLocalizations.of(context)!;
@@ -214,7 +206,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
       _loadedVersion = libraryVersion;
       _load();
     }
-    final results = _matches(maxResults);
+    final results = _matches();
 
     final body = SafeArea(
       child: Column(
@@ -538,4 +530,12 @@ class _ExploreResultTile extends StatelessWidget {
       onTap: onTap,
     );
   }
+}
+
+/// La búsqueda en la biblioteca local no se recorta: el tope de resultados
+/// del ajuste solo aplica a la búsqueda en línea.
+List<Song> localSearchMatches(List<Song> songs, String query) {
+  if (query.isEmpty) return const [];
+  final q = query.toLowerCase();
+  return songs.where((s) => s.title.toLowerCase().contains(q) || s.artist.toLowerCase().contains(q)).toList();
 }

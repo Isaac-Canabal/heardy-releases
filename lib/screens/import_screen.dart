@@ -48,6 +48,7 @@ class ImportScreen extends StatefulWidget {
 class _ImportScreenState extends State<ImportScreen> {
   final _urlController = TextEditingController();
   bool _isAnalyzing = false;
+  ({int done, int total})? _matchProgress;
   String? _errorMessage;
   /// True sólo cuando [_errorMessage] viene de
   /// [DownloadSourceErrorKind.network] — el único caso en el que tiene
@@ -170,10 +171,13 @@ class _ImportScreenState extends State<ImportScreen> {
         // duración — nunca por título/artista. El resultado elegido se
         // enseña siempre antes de descargar; nada se resuelve en silencio.
         final spotify = await widget.spotifyService.analyze(url);
-        final matches = <SpotifyMatch>[];
-        for (final track in spotify.tracks) {
-          matches.add(await matchSpotifyTrack(track, source));
-        }
+        final matches = await matchSpotifyTracks(
+          spotify.tracks,
+          source,
+          onProgress: (done, total) {
+            if (mounted) setState(() => _matchProgress = (done: done, total: total));
+          },
+        );
         if (!mounted) return;
         setState(() {
           _analyzedKind = _UrlKind.spotify;
@@ -214,7 +218,12 @@ class _ImportScreenState extends State<ImportScreen> {
       // Un único punto de reset — la pantalla que reemplaza a ésta (la vieja
       // add_from_youtube_screen.dart) tenía un bug justo por resetear el
       // flag en cada `return` en vez de en un solo `finally`.
-      if (mounted) setState(() => _isAnalyzing = false);
+      if (mounted) {
+        setState(() {
+          _isAnalyzing = false;
+          _matchProgress = null;
+        });
+      }
       // El servidor acaba de responder con éxito: buen momento, sin necesidad
       // de un polling propio, para vaciar lo que haya quedado en la lista de
       // espera de una vez anterior en la que no respondía.
@@ -318,10 +327,7 @@ class _ImportScreenState extends State<ImportScreen> {
 
     final l10n = AppLocalizations.of(context)!;
     _showSnack(
-      l10n.importSongsQueuedSnack(added) +
-          (exceedsPlaylistBatch(playlist.entries.length)
-              ? l10n.importBatchCappedSuffix(maxPlaylistBatch)
-              : ''),
+      l10n.importSongsQueuedSnack(added),
     );
   }
 
@@ -348,7 +354,7 @@ class _ImportScreenState extends State<ImportScreen> {
 
     final provider = context.read<DownloadProvider>();
     var added = 0;
-    for (final match in acceptable.take(maxPlaylistBatch)) {
+    for (final match in acceptable) {
       final ok = await provider.enqueueTrack(
         match.youtubeTrack!,
         playlistId: playlistId,
@@ -367,10 +373,9 @@ class _ImportScreenState extends State<ImportScreen> {
     provider.processQueue();
 
     _showSnack(
-      (skipped == 0
-              ? l10n.importSongsQueuedSnack(added)
-              : l10n.importSongsQueuedSnack(added) + l10n.importSpotifySkippedSuffix(skipped)) +
-          (exceedsPlaylistBatch(acceptable.length) ? l10n.importBatchCappedSuffix(maxPlaylistBatch) : ''),
+      skipped == 0
+          ? l10n.importSongsQueuedSnack(added)
+          : l10n.importSongsQueuedSnack(added) + l10n.importSpotifySkippedSuffix(skipped),
     );
   }
 
@@ -449,6 +454,21 @@ class _ImportScreenState extends State<ImportScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 90),
               children: [
+                if (_isAnalyzing && _matchProgress != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          l10n.importMatchingProgress(_matchProgress!.done, _matchProgress!.total),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 13),
+                        ),
+                        const SizedBox(height: 6),
+                        LinearProgressIndicator(value: _matchProgress!.done / _matchProgress!.total),
+                      ],
+                    ),
+                  ),
                 if (_errorMessage != null)
                   _buildErrorBanner(_errorMessage!, onSaveForLater: _errorIsOffline ? _saveForLater : null),
                 if (_analyzedKind == _UrlKind.video && _analyzedTrack != null)
@@ -1002,9 +1022,9 @@ class _FailureRow extends StatelessWidget {
     // Un aviso de cuota no es un fallo del trabajo: sigue en la cola y se
     // reintentará solo cuando pase el tiempo indicado. Se distingue con
     // ámbar en vez de rojo para no leerse como "esto se rompió".
-    final isQuotaWait = failure.retryAfterSeconds != null;
-    final tint = isQuotaWait ? Colors.amber : Colors.red;
-    final icon = isQuotaWait
+    final isWaitNotice = failure.retryAfterSeconds != null;
+    final tint = isWaitNotice ? Colors.amber : Colors.red;
+    final icon = isWaitNotice
         ? Icons.hourglass_bottom_rounded
         : (failure.permanent ? Icons.block_rounded : Icons.wifi_off_rounded);
 

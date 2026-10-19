@@ -3,7 +3,6 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
 import '../providers/cloud_library_provider.dart';
-import '../providers/download_provider.dart';
 import '../providers/folder_sync_provider.dart';
 import '../services/friendly_error.dart';
 import '../theme/app_theme.dart';
@@ -51,16 +50,12 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
     final l10n = AppLocalizations.of(context)!;
     final provider = context.read<CloudLibraryProvider>();
     final messenger = ScaffoldMessenger.of(context);
-    final total = provider.downloadableCount;
-    final count = total < maxPlaylistBatch ? total : maxPlaylistBatch;
+    final count = provider.downloadableCount;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Text(l10n.cloudLibConfirmTitle(count)),
-        content: Text([
-          l10n.cloudLibConfirmBody,
-          if (exceedsPlaylistBatch(total)) l10n.cloudLibConfirmCap(maxPlaylistBatch),
-        ].join('\n\n')),
+        content: Text(l10n.cloudLibConfirmBody),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text(l10n.commonCancel)),
           FilledButton(onPressed: () => Navigator.pop(ctx, true), child: Text(l10n.cloudLibDownload)),

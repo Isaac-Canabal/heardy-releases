@@ -47,6 +47,79 @@ class SpotifyAnalysisResult {
   bool get isCollection => type == 'album' || type == 'playlist';
 }
 
+/// Una página de pistas de playlist de la API interna del reproductor web
+/// (`pathfinder`), la única vía sin clave propia para pasar de las 100 pistas
+/// que trae la página embed.
+class SpotifyPlaylistPage {
+  final List<SpotifyTrackInfo> tracks;
+
+  /// Ítems de la página, contando los no reproducibles que se descartaron:
+  /// es lo que avanza el `offset`.
+  final int itemCount;
+  final int totalCount;
+
+  const SpotifyPlaylistPage({required this.tracks, required this.itemCount, required this.totalCount});
+}
+
+/// Lee la respuesta de `fetchPlaylist`. Devuelve null si el formato no es el
+/// esperado (Spotify lo cambia sin aviso).
+SpotifyPlaylistPage? parsePathfinderPlaylistPage(Object? json) {
+  if (json is! Map) return null;
+  final data = json['data'];
+  final playlist = data is Map ? data['playlistV2'] : null;
+  final content = playlist is Map ? playlist['content'] : null;
+  if (content is! Map) return null;
+  final items = content['items'];
+  final total = content['totalCount'];
+  if (items is! List || total is! int) return null;
+
+  final tracks = <SpotifyTrackInfo>[];
+  for (final item in items) {
+    final wrapper = item is Map ? item['itemV2'] : null;
+    final track = wrapper is Map ? wrapper['data'] : null;
+    if (track is! Map || track['__typename'] != 'Track') continue;
+    final playability = track['playability'];
+    if (playability is Map && playability['playable'] == false) continue;
+    final name = track['name'];
+    final duration = track['trackDuration'];
+    final ms = duration is Map ? duration['totalMilliseconds'] : null;
+    if (name is! String || ms is! int) continue;
+
+    final artistItems = track['artists'] is Map ? (track['artists'] as Map)['items'] : null;
+    final artists = [
+      if (artistItems is List)
+        for (final a in artistItems)
+          if (a is Map && a['profile'] is Map && (a['profile'] as Map)['name'] is String)
+            (a['profile'] as Map)['name'] as String,
+    ];
+    tracks.add(SpotifyTrackInfo(
+      title: name,
+      artist: artists.isEmpty ? 'Artista desconocido' : artists.join(', '),
+      durationMs: ms,
+      thumbnailUrl: _pathfinderCover(track['albumOfTrack']),
+      spotifyUri: track['uri'] is String ? track['uri'] as String : null,
+    ));
+  }
+  return SpotifyPlaylistPage(tracks: tracks, itemCount: items.length, totalCount: total);
+}
+
+String? _pathfinderCover(Object? album) {
+  final cover = album is Map ? album['coverArt'] : null;
+  final sources = cover is Map ? cover['sources'] : null;
+  if (sources is! List) return null;
+  String? best;
+  var bestHeight = -1;
+  for (final s in sources) {
+    if (s is! Map || s['url'] is! String) continue;
+    final h = s['height'] is int ? s['height'] as int : 0;
+    if (h > bestHeight) {
+      bestHeight = h;
+      best = s['url'] as String;
+    }
+  }
+  return best;
+}
+
 /// Extracts music metadata from Spotify embed pages.
 ///
 /// This works by fetching the server-rendered HTML of
@@ -173,8 +246,15 @@ class SpotifyService {
       case 'track':
         return _parseTrack(entity);
       case 'album':
-      case 'playlist':
         return await _parseCollection(entity, parsed.type);
+      case 'playlist':
+        final token = nextData['props']?['pageProps']?['state']?['settings']?['session']?['accessToken'];
+        return await _parseCollection(
+          entity,
+          parsed.type,
+          playlistId: parsed.id,
+          accessToken: token is String ? token : null,
+        );
       default:
         throw const FriendlyException('Ese tipo de enlace de Spotify no se puede descargar todavía.', 'E-SP-TYPE');
     }
@@ -255,7 +335,11 @@ class SpotifyService {
 
   /// Parses an album or playlist entity with its trackList from __NEXT_DATA__.
   Future<SpotifyAnalysisResult> _parseCollection(
-      Map<String, dynamic> entity, String type) async {
+    Map<String, dynamic> entity,
+    String type, {
+    String? playlistId,
+    String? accessToken,
+  }) async {
     final name = entity['title'] as String? ?? entity['name'] as String? ?? 'Sin nombre';
     final subtitle = entity['subtitle'] as String?;
     final thumbnailUrl = _extractBestThumbnail(entity);
@@ -332,6 +416,10 @@ class SpotifyService {
       }
     }
 
+    if (playlistId != null && accessToken != null && trackList.length >= _embedTrackLimit) {
+      tracks.addAll(await _fetchRemainingPlaylistTracks(playlistId, accessToken, trackList.length));
+    }
+
     return SpotifyAnalysisResult(
       type: type,
       name: name,
@@ -339,6 +427,65 @@ class SpotifyService {
       thumbnailUrl: thumbnailUrl,
       tracks: tracks,
     );
+  }
+
+  /// La página embed corta las playlists en 100 pistas.
+  static const int _embedTrackLimit = 100;
+  static const int _maxPlaylistTracks = 10000;
+  static const int _pathfinderPageSize = 100;
+
+  /// Hash de la consulta persistida `fetchPlaylist` del reproductor web. No
+  /// es una API pública: cuando Spotify despliega una versión nueva el hash
+  /// puede dejar de valer, y entonces la playlist se queda en las primeras
+  /// 100 pistas en vez de fallar.
+  static const String _fetchPlaylistHash = '19ff1327c29e99c208c86d7a9d8f1929cfdf3d3202a0ff4253c821f1901aa94d';
+
+  /// Pide a `pathfinder`, con el token anónimo de la página embed, las pistas
+  /// desde [offset]. Ante cualquier fallo se queda con lo que ya tenía.
+  Future<List<SpotifyTrackInfo>> _fetchRemainingPlaylistTracks(String playlistId, String token, int offset) async {
+    final result = <SpotifyTrackInfo>[];
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 15);
+    try {
+      var total = _maxPlaylistTracks;
+      while (offset < total && offset < _maxPlaylistTracks) {
+        final request = await client.postUrl(Uri.parse('https://api-partner.spotify.com/pathfinder/v2/query'));
+        request.headers.set('Authorization', 'Bearer $token');
+        request.headers.set('App-Platform', 'WebPlayer');
+        request.headers.contentType = ContentType.json;
+        request.write(jsonEncode({
+          'operationName': 'fetchPlaylist',
+          'variables': {
+            'uri': 'spotify:playlist:$playlistId',
+            'offset': offset,
+            'limit': _pathfinderPageSize,
+            'enableWatchFeedEntrypoint': false,
+          },
+          'extensions': {
+            'persistedQuery': {'version': 1, 'sha256Hash': _fetchPlaylistHash},
+          },
+        }));
+        final response = await _withTimeout(request.close(), 'La lista de Spotify');
+        final body = await _withTimeout(response.transform(utf8.decoder).join(), 'La lista de Spotify');
+        if (response.statusCode != 200) {
+          appLog('SpotifyService: pathfinder respondió ${response.statusCode} en offset $offset');
+          break;
+        }
+        final page = parsePathfinderPlaylistPage(jsonDecode(body));
+        if (page == null || page.itemCount == 0) {
+          appLog('SpotifyService: formato inesperado de pathfinder en offset $offset');
+          break;
+        }
+        result.addAll(page.tracks);
+        total = page.totalCount;
+        offset += page.itemCount;
+      }
+    } catch (e) {
+      appLog('SpotifyService: no se pudieron leer más pistas (${e.runtimeType})');
+    } finally {
+      client.close();
+    }
+    return result;
   }
 
   /// Extracts artist name(s) from the entity data.

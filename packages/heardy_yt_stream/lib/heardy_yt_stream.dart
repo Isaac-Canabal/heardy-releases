@@ -149,8 +149,8 @@ abstract final class YtStreamErrorCode {
 class HeardyYtStream {
   static const MethodChannel _channel = MethodChannel('heardy_yt_stream');
 
-  static const int maxSearchLimit = 100;
-  static const int defaultMaxPlaylistEntries = 500;
+  static const int maxSearchLimit = 200;
+  static const int defaultMaxPlaylistEntries = 10000;
 
   /// [input] is an 11-character video id or a YouTube / YouTube Music video URL.
   /// Throws [PlatformException] with a [YtStreamErrorCode] code.

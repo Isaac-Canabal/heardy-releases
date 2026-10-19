@@ -235,7 +235,7 @@ class SettingsProvider with ChangeNotifier {
   }
 
   Future<void> setMaxSearchResults(int value) async {
-    if (value >= 10 && value <= 100) {
+    if (value >= 10 && value <= 200) {
       _maxSearchResults = value;
       notifyListeners();
       final prefs = await SharedPreferences.getInstance();

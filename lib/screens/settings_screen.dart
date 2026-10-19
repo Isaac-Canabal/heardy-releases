@@ -534,7 +534,7 @@ class SettingsScreen extends StatelessWidget {
                     IconButton(
                       icon: const Icon(Icons.add, size: 20),
                       color: AppTheme.primaryLight,
-                      onPressed: settings.maxSearchResults < 100
+                      onPressed: settings.maxSearchResults < 200
                           ? () => settings.setMaxSearchResults(
                               settings.maxSearchResults + 10,
                             )

@@ -245,9 +245,12 @@ class YtdlpLocalClient {
   final YtdlpStreamingRunner _runStreaming;
   final Duration timeout;
   final Duration downloadTimeout;
+  // Una playlist de miles de pistas son decenas de páginas de InnerTube:
+  // el minuto de [timeout] no alcanza.
+  final Duration playlistTimeout;
 
-  static const int maxSearchLimit = 50;
-  static const int maxPlaylistEntries = 500;
+  static const int maxSearchLimit = 100;
+  static const int maxPlaylistEntries = 10000;
 
   YtdlpLocalClient(
     this.executablePath, {
@@ -255,6 +258,7 @@ class YtdlpLocalClient {
     YtdlpStreamingRunner? streamingRunner,
     this.timeout = const Duration(seconds: 60),
     this.downloadTimeout = const Duration(minutes: 20),
+    this.playlistTimeout = const Duration(minutes: 10),
   })  : _run = runner ?? runYtdlpProcess,
         _runStreaming = streamingRunner ?? runYtdlpStreaming;
 
@@ -279,7 +283,10 @@ class YtdlpLocalClient {
     if (listId == null) {
       throw const DownloadSourceException(DownloadSourceErrorKind.notFound, 'yt-dlp local: URL de playlist inválida');
     }
-    final stdout = await _invoke(ytdlpPlaylistArguments(listId, maxEntries.clamp(1, maxPlaylistEntries)));
+    final stdout = await _invoke(
+      ytdlpPlaylistArguments(listId, maxEntries.clamp(1, maxPlaylistEntries)),
+      timeout: playlistTimeout,
+    );
     return playlistFromYtdlpJson(listId, stdout);
   }
 
@@ -323,10 +330,10 @@ class YtdlpLocalClient {
     }
   }
 
-  Future<String> _invoke(List<String> arguments) async {
+  Future<String> _invoke(List<String> arguments, {Duration? timeout}) async {
     final YtdlpProcessResult result;
     try {
-      result = await _run(executablePath, arguments, timeout);
+      result = await _run(executablePath, arguments, timeout ?? this.timeout);
     } on TimeoutException {
       throw const DownloadSourceException(DownloadSourceErrorKind.network, 'yt-dlp local: tiempo agotado');
     } on ProcessException {
