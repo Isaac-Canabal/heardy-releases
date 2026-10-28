@@ -12,7 +12,7 @@
 ; cambiarlo nunca: es lo que permite que una instalación futura se detecte
 ; como una actualización en vez de una instalación paralela.
 #define MyAppName "Heardy"
-#define MyAppVersion "1.2.4"
+#define MyAppVersion "1.2.5"
 #define MyAppExeName "heardy.exe"
 #define MyReleaseDir "..\..\build\windows\x64\runner\Release"
 
@@ -105,5 +105,7 @@ Filename: "{sys}\netsh.exe"; Parameters: "advfirewall firewall delete rule name=
 ; en %LOCALAPPDATA%\Heardy\yt-dlp, porque {app} suele ser de sólo lectura.
 ; ffmpeg.exe (LGPL, para la onda del seek bar) y sus DLL viajan en {app}\ffmpeg,
 ; con su LICENSE.txt; entran por el mismo [Files] recursivo que el resto de Release.
+; libmpv-2.dll (LGPL) es el de media_kit_libs_windows_video, no el de sólo
+; audio: lo cambia windows/CMakeLists.txt antes del install, para el ecualizador.
 [UninstallDelete]
 Type: filesandordirs; Name: "{localappdata}\Heardy\yt-dlp"

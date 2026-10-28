@@ -17,6 +17,7 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'services/database_helper.dart';
+import 'services/artist_photo_cache.dart';
 import 'services/audio_effects_service.dart';
 import 'services/audio_player_handler.dart';
 import 'services/cloud_source.dart';
@@ -370,6 +371,12 @@ void main() async {
         Provider<DownloadSource>.value(value: downloadSource),
         Provider<StreamResolver>.value(value: TimeoutStreamResolver(streamResolver)),
         Provider<CloudSource>.value(value: cloudSource),
+        Provider<ArtistPhotoCache>.value(
+          value: ArtistPhotoCache(
+            search: downloadSource.exploreArtistSearch,
+            isAvailable: () => settingsProvider.hasDownloadServer && authProvider.isReady,
+          ),
+        ),
         ChangeNotifierProvider.value(value: authProvider),
         ChangeNotifierProvider.value(value: settingsProvider),
         ChangeNotifierProvider.value(value: musicProvider),

@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/statistics_data.dart';
+import '../services/artist_photo_cache.dart';
 import '../services/statistics_service.dart';
 import '../theme/app_theme.dart';
 
@@ -12,9 +14,12 @@ import '../theme/app_theme.dart';
 /// comparte. Los cuerpos de los widgets son los mismos que estaban ahí: esto
 /// es una extracción, no un rediseño.
 ///
-/// Ninguno de estos widgets toca la base de datos ni un `Provider`: reciben un
-/// [StatisticsData] ya cargado. Por eso se pueden probar en un `testWidgets`
-/// normal, sin `runAsync`, sin ffi y sin árbol de providers.
+/// Ninguno de estos widgets toca la base de datos: reciben un [StatisticsData]
+/// ya cargado. Por eso se pueden probar en un `testWidgets` normal, sin
+/// `runAsync`, sin ffi y sin árbol de providers. La única dependencia opcional
+/// es [ArtistPhotoCache] para las fotos de artista: se toma de [artistPhotos]
+/// o, si no se pasa, del `Provider` cuando existe; sin ninguno de los dos se
+/// ven los marcadores de siempre.
 class StatisticsView extends StatelessWidget {
   /// `null` mientras se carga: pinta el indicador de progreso conservando la
   /// cabecera y el contenedor, que es como se veía antes de la extracción.
@@ -46,6 +51,8 @@ class StatisticsView extends StatelessWidget {
   /// enterarse de que compartir existe.
   final Widget? trailing;
 
+  final ArtistPhotoCache? artistPhotos;
+
   const StatisticsView({
     super.key,
     required this.data,
@@ -56,9 +63,19 @@ class StatisticsView extends StatelessWidget {
     this.decorated = true,
     this.headerLabel,
     this.trailing,
+    this.artistPhotos,
   });
 
   static const int _collapsedSongCount = 5;
+
+  ArtistPhotoCache? _photos(BuildContext context) {
+    if (artistPhotos != null) return artistPhotos;
+    try {
+      return Provider.of<ArtistPhotoCache>(context, listen: false);
+    } on ProviderNotFoundException {
+      return null;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -136,6 +153,7 @@ class StatisticsView extends StatelessWidget {
       );
     }
 
+    final photos = _photos(context);
     final visibleSongs = expanded || stats.topSongs.length <= _collapsedSongCount
         ? stats.topSongs
         : stats.topSongs.sublist(0, _collapsedSongCount);
@@ -173,6 +191,8 @@ class StatisticsView extends StatelessWidget {
                   ? l10n.statsUnknownArtist
                   : stats.topArtists[i].name,
               playCount: stats.topArtists[i].playCount,
+              photoQuery: stats.topArtists[i].name,
+              photos: photos,
             ),
         ],
         if (stats.topSongs.isNotEmpty) ...[
@@ -339,11 +359,17 @@ class TopArtistRow extends StatelessWidget {
   final String name;
   final int playCount;
 
+  /// Nombre con el que se busca la foto; vacío (artista desconocido) no busca.
+  final String photoQuery;
+  final ArtistPhotoCache? photos;
+
   const TopArtistRow({
     super.key,
     required this.rank,
     required this.name,
     required this.playCount,
+    this.photoQuery = '',
+    this.photos,
   });
 
   @override
@@ -354,19 +380,7 @@ class TopArtistRow extends StatelessWidget {
         children: [
           _RankLabel(rank),
           const SizedBox(width: 8),
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              gradient: AppTheme.primaryGradient,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(
-              Icons.person_rounded,
-              color: Colors.white.withValues(alpha: 0.7),
-              size: 20,
-            ),
-          ),
+          _ArtistAvatar(query: photoQuery, photos: photos),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -382,6 +396,80 @@ class TopArtistRow extends StatelessWidget {
           ),
           _PlayCountBadge(playCount),
         ],
+      ),
+    );
+  }
+}
+
+class _ArtistAvatar extends StatefulWidget {
+  final String query;
+  final ArtistPhotoCache? photos;
+
+  const _ArtistAvatar({required this.query, required this.photos});
+
+  @override
+  State<_ArtistAvatar> createState() => _ArtistAvatarState();
+}
+
+class _ArtistAvatarState extends State<_ArtistAvatar> {
+  String? _url;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_ArtistAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.query != widget.query || oldWidget.photos != widget.photos) {
+      _url = null;
+      _load();
+    }
+  }
+
+  void _load() {
+    final photos = widget.photos;
+    final query = widget.query;
+    if (photos == null || query.trim().isEmpty) return;
+    _url = photos.cached(query);
+    if (_url != null) return;
+    photos.photoFor(query).then((url) {
+      if (!mounted || url == null || widget.query != query || widget.photos != photos) return;
+      setState(() => _url = url);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _url;
+    if (url == null) return _placeholder();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Image.network(
+        url,
+        width: 40,
+        height: 40,
+        fit: BoxFit.cover,
+        cacheWidth: 80,
+        errorBuilder: (_, __, ___) => _placeholder(),
+      ),
+    );
+  }
+
+  Widget _placeholder() {
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        gradient: AppTheme.primaryGradient,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(
+        Icons.person_rounded,
+        color: Colors.white.withValues(alpha: 0.7),
+        size: 20,
       ),
     );
   }

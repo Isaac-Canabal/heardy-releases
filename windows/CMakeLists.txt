@@ -57,6 +57,59 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# libmpv para el ecualizador. El de media_kit_libs_windows_audio (mpv 0.36,
+# FFmpeg 6.0 mínimo) sólo trae el filtro `equalizer`, falla al encadenar dos
+# `lavfi` y su `af-command` no acepta destino, así que no permite 10 bandas
+# ajustables en vivo. Se reemplaza por el libmpv que media_kit publica para
+# media_kit_libs_windows_video (mpv 0.39, FFmpeg con avfilter), LGPL: FFmpeg
+# con --disable-gpl --enable-version3 y mpv con -Dgpl=false (ver
+# packages/ffmpeg.cmake y packages/mpv.cmake de media-kit/libmpv-win32-video-cmake
+# en el commit ed01efd). El .7z se trata como no confiable: se verifica por
+# SHA-256 y sólo se extrae libmpv-2.dll en su propio directorio. Sin él la
+# cadena de 10 bandas deja mudo al reproductor, por eso falla el build en vez
+# de seguir con la DLL vieja. tool/mpv_eq_probe.py comprueba la DLL resultante.
+set(LIBMPV_EQ_TAG "20241021")
+set(LIBMPV_EQ_ARCHIVE_NAME "mpv-dev-x86_64-20241021-git-0f78584.7z")
+set(LIBMPV_EQ_SHA256 "e23701df0adc1fe57c8ede3ff313513b0b80519870058c2d35ff02754284a007")
+set(LIBMPV_EQ_DLL_SHA256 "56f9a69200863c2dcd2fb6367427ffedc35550d26f947d6c36eab37bd2a65fd5")
+set(LIBMPV_EQ_ARCHIVE "${CMAKE_BINARY_DIR}/libmpv-eq-dl/${LIBMPV_EQ_ARCHIVE_NAME}")
+set(LIBMPV_EQ_DIR "${CMAKE_BINARY_DIR}/libmpv-eq-${LIBMPV_EQ_TAG}")
+set(LIBMPV_EQ_DLL "${LIBMPV_EQ_DIR}/libmpv-2.dll")
+if(EXISTS "${LIBMPV_EQ_DLL}")
+  file(SHA256 "${LIBMPV_EQ_DLL}" LIBMPV_EQ_HAVE)
+  if(NOT LIBMPV_EQ_HAVE STREQUAL LIBMPV_EQ_DLL_SHA256)
+    file(REMOVE_RECURSE "${LIBMPV_EQ_DIR}")
+  endif()
+endif()
+if(NOT EXISTS "${LIBMPV_EQ_DLL}")
+  file(DOWNLOAD
+    "https://github.com/media-kit/libmpv-win32-video-cmake/releases/download/${LIBMPV_EQ_TAG}/${LIBMPV_EQ_ARCHIVE_NAME}"
+    "${LIBMPV_EQ_ARCHIVE}"
+    EXPECTED_HASH SHA256=${LIBMPV_EQ_SHA256}
+    STATUS LIBMPV_EQ_DL_STATUS)
+  list(GET LIBMPV_EQ_DL_STATUS 0 LIBMPV_EQ_DL_CODE)
+  if(NOT LIBMPV_EQ_DL_CODE EQUAL 0)
+    file(REMOVE "${LIBMPV_EQ_ARCHIVE}")
+    message(FATAL_ERROR "No se pudo descargar ${LIBMPV_EQ_ARCHIVE_NAME}: ${LIBMPV_EQ_DL_STATUS}")
+  endif()
+  file(MAKE_DIRECTORY "${LIBMPV_EQ_DIR}")
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E tar xf "${LIBMPV_EQ_ARCHIVE}" -- libmpv-2.dll
+    WORKING_DIRECTORY "${LIBMPV_EQ_DIR}"
+    RESULT_VARIABLE LIBMPV_EQ_EXTRACT_RESULT)
+  if(EXISTS "${LIBMPV_EQ_DLL}")
+    file(SHA256 "${LIBMPV_EQ_DLL}" LIBMPV_EQ_HAVE)
+  endif()
+  if(NOT LIBMPV_EQ_EXTRACT_RESULT EQUAL 0 OR NOT LIBMPV_EQ_HAVE STREQUAL LIBMPV_EQ_DLL_SHA256)
+    file(REMOVE_RECURSE "${LIBMPV_EQ_DIR}")
+    message(FATAL_ERROR "libmpv-2.dll de ${LIBMPV_EQ_ARCHIVE_NAME} no coincide con el hash fijado")
+  endif()
+endif()
+# Se cambia la entrada de media_kit en la lista en vez de instalar encima, para
+# que no dependa del orden de los install().
+list(FILTER PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "/libmpv-2\\.dll$")
+list(APPEND PLUGIN_BUNDLED_LIBRARIES "${LIBMPV_EQ_DLL}")
+
 
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
@@ -133,14 +186,19 @@ endif()
 # ffmpeg.exe (build LGPL, no GPL) para la onda del seek bar en Windows: las
 # descargas son M4A fragmentado y Media Foundation no lo lee. Se descarga fijado
 # a un autobuild de BtbN/FFmpeg-Builds (n8.1.3, "win64-lgpl-shared") y verificado
-# por SHA-256; no se versiona. Si BtbN retira ese autobuild, subir a otro y
-# recalcular el hash. El .zip es lo que se descarga (~81 MB); se trata como no
+# por SHA-256; no se versiona. BtbN borra sus autobuilds a las pocas semanas:
+# cuando pase, subir FFMPEG_TAG/FFMPEG_DIRNAME al más reciente y copiar su hash
+# de checksums.sha256 del mismo release. El hash se comprueba aparte y no con
+# EXPECTED_HASH, porque con EXPECTED_HASH una descarga fallida (404) aborta todo
+# el build en vez de sólo dejar la onda desactivada. En CI (variable CI) sí se
+# aborta: un release sin ffmpeg pierde la onda y el nivelador de Windows sin
+# que nadie se entere. El .zip es lo que se descarga (~81 MB); se trata como no
 # confiable: se extrae en su propio directorio nuevo y solo se copian
 # ffmpeg.exe, sus DLL y LICENSE.txt. La app lo busca en <exe>/ffmpeg/ffmpeg.exe;
 # sin el, la onda cae al Slider.
-set(FFMPEG_TAG "autobuild-2026-10-10-13-04")
-set(FFMPEG_DIRNAME "ffmpeg-n8.1.3-17-gc389840894-win64-lgpl-shared-8.1")
-set(FFMPEG_SHA256 "cfb9db660bf2751dcc7d79791250b0e6df1a3f63cfc00260f6b66626c425b112")
+set(FFMPEG_TAG "autobuild-2026-10-28-19-47")
+set(FFMPEG_DIRNAME "ffmpeg-n8.1.3-25-g611cec792a-win64-lgpl-shared-8.1")
+set(FFMPEG_SHA256 "0448c3f3b9bdc724cc0189d5ce6e6bfa5b8937e7ec408e1e97fb08719bdb3b92")
 set(FFMPEG_ZIP "${CMAKE_BINARY_DIR}/ffmpeg-dl/${FFMPEG_DIRNAME}.zip")
 set(FFMPEG_EXTRACT_DIR "${CMAKE_BINARY_DIR}/ffmpeg-extract-${FFMPEG_TAG}")
 set(FFMPEG_FILES
@@ -150,10 +208,20 @@ if(NOT EXISTS "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/ffmpeg.exe")
   file(DOWNLOAD
     "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_TAG}/${FFMPEG_DIRNAME}.zip"
     "${FFMPEG_ZIP}"
-    EXPECTED_HASH SHA256=${FFMPEG_SHA256}
     STATUS FFMPEG_DL_STATUS)
   list(GET FFMPEG_DL_STATUS 0 FFMPEG_DL_CODE)
+  set(FFMPEG_ZIP_OK FALSE)
   if(FFMPEG_DL_CODE EQUAL 0)
+    file(SHA256 "${FFMPEG_ZIP}" FFMPEG_ZIP_HASH)
+    if(FFMPEG_ZIP_HASH STREQUAL FFMPEG_SHA256)
+      set(FFMPEG_ZIP_OK TRUE)
+    else()
+      message(WARNING "ffmpeg: el hash del .zip no coincide (${FFMPEG_ZIP_HASH})")
+    endif()
+  else()
+    message(WARNING "ffmpeg: no se pudo descargar ${FFMPEG_TAG} (${FFMPEG_DL_STATUS})")
+  endif()
+  if(FFMPEG_ZIP_OK)
     file(REMOVE_RECURSE "${FFMPEG_EXTRACT_DIR}")
     file(MAKE_DIRECTORY "${FFMPEG_EXTRACT_DIR}")
     set(FFMPEG_MEMBERS "${FFMPEG_DIRNAME}/LICENSE.txt")
@@ -171,6 +239,9 @@ if(NOT EXISTS "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/ffmpeg.exe")
     file(REMOVE "${FFMPEG_ZIP}")
   endif()
   if(NOT EXISTS "${FFMPEG_EXTRACT_DIR}/${FFMPEG_DIRNAME}/bin/ffmpeg.exe")
+    if(DEFINED ENV{CI})
+      message(FATAL_ERROR "No se pudo preparar ffmpeg.exe (${FFMPEG_TAG}): actualizar el autobuild de BtbN en windows/CMakeLists.txt")
+    endif()
     message(WARNING "No se pudo preparar ffmpeg.exe: la onda del seek bar quedara desactivada en Windows")
   endif()
 endif()

@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:palette_generator/palette_generator.dart';
+import '../services/audio_effects_service.dart';
+import 'equalizer_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/cover_color.dart';
 import '../services/explore_logic.dart';
@@ -704,6 +706,32 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   showPlaybackSpeedSheet(this.context, audioHandler);
+                },
+              ),
+              ListTile(
+                key: const Key('now_playing_equalizer'),
+                leading: const Icon(Icons.equalizer, color: Colors.white54),
+                title: Text(
+                  l10n.equalizerTitle,
+                  style: const TextStyle(color: Colors.white),
+                ),
+                trailing: Consumer<AudioEffectsService>(
+                  builder: (context, fx, _) => Text(
+                    fx.equalizerEnabled
+                        ? l10n.nowPlayingOnLabel
+                        : l10n.nowPlayingOffLabel,
+                    style: TextStyle(
+                      color: fx.equalizerEnabled
+                          ? const Color(0xFF8C9EFF)
+                          : Colors.white38,
+                    ),
+                  ),
+                ),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  Navigator.of(this.context).push(
+                    MaterialPageRoute(builder: (_) => const EqualizerScreen()),
+                  );
                 },
               ),
               const Divider(color: Colors.white24, height: 1),

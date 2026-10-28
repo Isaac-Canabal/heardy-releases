@@ -1,7 +1,7 @@
 name: heardy
 description: An offline-first local music library player.
 publish_to: 'none'
-version: 1.2.4+15
+version: 1.2.5+16
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -111,6 +111,16 @@ dev_dependencies:
   # path_provider por un directorio temporal para correr MetadataService
   # (temp copy + carátulas) desde escritorio, sin plugins ni dispositivo.
   path_provider_platform_interface: ^2.1.2
+
+dependency_overrides:
+  # Fork vendorizado de just_audio 0.9.46 (sólo cambia Android): mete el
+  # ecualizador de 10 bandas dentro de ExoPlayer como AudioProcessor del
+  # DefaultAudioSink y apaga el audio offload, que se salta todo el
+  # procesado. El Equalizer del framework (audiofx) dependía del OEM y del
+  # id de sesión, y con offload a veces no sonaba. Ver
+  # packages/just_audio_patch/CHANGELOG.md.
+  just_audio:
+    path: packages/just_audio_patch
 
 flutter_launcher_icons:
   android: true

@@ -16,6 +16,7 @@ import '../screens/lan_sync_screen.dart';
 import '../screens/legal_screen.dart';
 import '../screens/sync_status_screen.dart';
 import '../screens/cloud_library_screen.dart';
+import '../screens/equalizer_screen.dart';
 import '../services/audio_effects_service.dart';
 import '../services/audio_player_handler.dart';
 import '../services/database_helper.dart';
@@ -1325,6 +1326,18 @@ class _AudioEffectsSection extends StatelessWidget {
               style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
             ),
             onChanged: (enabled) => fx.setStabilizeEnabled(enabled),
+          ),
+          const Divider(height: 24, color: Colors.white12),
+          ListTile(
+            key: const Key('equalizer_tile'),
+            contentPadding: EdgeInsets.zero,
+            title: Text(l10n.equalizerTitle, style: const TextStyle(color: Colors.white, fontSize: 13)),
+            subtitle: Text(
+              fx.equalizerEnabled ? equalizerPresetLabel(l10n, fx.equalizerPreset) : l10n.equalizerSettingsBody,
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
+            ),
+            trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EqualizerScreen())),
           ),
         ],
       ),

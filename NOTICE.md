@@ -47,8 +47,11 @@ third-party components. This list is not exhaustive for transitive dependencies.
 
 All other Dart and Flutter packages are used under their own licenses (BSD-3-Clause, MIT, Apache-2.0, ...). The exact
 set and versions are pinned in `pubspec.lock`; each package carries its license in its pub.dev page and source.
-`packages/just_audio_media_kit_patch` is a patched copy of `just_audio_media_kit` and keeps its own `LICENSE`. On
-Windows, audio playback uses `media_kit` with libmpv (see `media_kit_libs_windows_audio` for its licensing).
+`packages/just_audio_media_kit_patch` is a patched copy of `just_audio_media_kit` and `packages/just_audio_patch` a
+patched copy of `just_audio` 0.9.46 (in-player equalizer); both keep their own `LICENSE`. On Windows, audio playback
+uses `media_kit` with the LGPL libmpv build of `media-kit/libmpv-win32-video-cmake` (release 20241021: mpv built with
+`-Dgpl=false`, FFmpeg with `--disable-gpl`), downloaded at build time and pinned by SHA-256 in
+`windows/CMakeLists.txt`; its source is available from that project.
 
 Lyrics are fetched from LRCLIB (https://lrclib.net/).
 

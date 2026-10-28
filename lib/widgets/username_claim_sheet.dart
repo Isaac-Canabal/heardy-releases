@@ -117,6 +117,7 @@ class _UsernameClaimSheetState extends State<UsernameClaimSheet> {
           TextField(
             controller: _controller,
             autofocus: true,
+            onChanged: (_) => setState(() {}),
             style: const TextStyle(color: Colors.white),
             decoration: InputDecoration(
               hintText: l10n.usernameClaimHint,
