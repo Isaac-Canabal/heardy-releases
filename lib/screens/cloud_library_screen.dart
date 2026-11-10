@@ -40,6 +40,7 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
     }
     final text = switch (result) {
       CloudDownloadResult.noMatch => l10n.cloudLibNoMatch,
+      CloudDownloadResult.isMix => l10n.cloudLibMixNote,
       CloudDownloadResult.failed => l10n.cloudLibFailed,
       _ => null,
     };
@@ -162,7 +163,11 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
                   style: const TextStyle(color: Colors.white),
                 ),
                 subtitle: Text(
-                  entry.hasLink ? entry.artist : l10n.cloudLibNoLink(entry.artist),
+                  entry.isMix
+                      ? l10n.cloudLibMixSubtitle(entry.artist)
+                      : entry.hasLink
+                          ? entry.artist
+                          : l10n.cloudLibNoLink(entry.artist),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white54, fontSize: 12),
@@ -172,6 +177,13 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
                   children: [
                     if (entry.queued)
                       Text(l10n.cloudLibQueued, style: const TextStyle(color: Colors.white54, fontSize: 12))
+                    else if (entry.isMix)
+                      IconButton(
+                        key: Key('mix_info_${entry.fileHash}'),
+                        tooltip: l10n.cloudLibMixNote,
+                        icon: const Icon(Icons.info_outline_rounded, color: Colors.white70),
+                        onPressed: () => _downloadOne(entry),
+                      )
                     else
                       IconButton(
                         tooltip: l10n.cloudLibDownload,

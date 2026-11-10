@@ -9,7 +9,7 @@ import 'download_provider.dart';
 
 enum CloudLibraryStatus { idle, loading, ready, noLibrary, error }
 
-enum CloudDownloadResult { queued, alreadyQueued, noMatch, failed }
+enum CloudDownloadResult { queued, alreadyQueued, noMatch, failed, isMix }
 
 /// Una canción que la nube tiene y este equipo no.
 class CloudLibraryEntry {
@@ -22,6 +22,9 @@ class CloudLibraryEntry {
   String get title => (song['title'] as String?) ?? '';
   String get artist => (song['artist'] as String?) ?? '';
   bool get hasLink => ((song['sourceUrl'] as String?) ?? '').isNotEmpty;
+
+  /// Un mix no existe en internet: buscarlo por título bajaría otra canción.
+  bool get isMix => isMixRow(song);
 }
 
 /// Lista bajo demanda de "lo que tengo en mis otros dispositivos y acá no".
@@ -74,7 +77,7 @@ class CloudLibraryProvider extends ChangeNotifier {
       ];
 
   /// Cuántas se bajarían con [downloadAll]: con enlace y todavía no encoladas.
-  int get downloadableCount => entries.where((e) => e.hasLink && !e.queued).length;
+  int get downloadableCount => entries.where((e) => e.hasLink && !e.queued && !e.isMix).length;
 
   Future<void> refresh() async {
     _status = CloudLibraryStatus.loading;
@@ -112,6 +115,7 @@ class CloudLibraryProvider extends ChangeNotifier {
   }
 
   Future<CloudDownloadResult> downloadOne(CloudLibraryEntry entry) async {
+    if (entry.isMix) return CloudDownloadResult.isMix;
     if (_queuedHashes.contains(entry.fileHash)) return CloudDownloadResult.alreadyQueued;
     try {
       final direct = remoteTrackFromCloudSong(entry.song);
@@ -146,7 +150,7 @@ class CloudLibraryProvider extends ChangeNotifier {
   Future<int> downloadAll() async {
     var count = 0;
     for (final entry in entries) {
-      if (!entry.hasLink || entry.queued) continue;
+      if (!entry.hasLink || entry.queued || entry.isMix) continue;
       final track = remoteTrackFromCloudSong(entry.song);
       if (track == null) continue;
       final added = await _downloads.enqueueTrack(

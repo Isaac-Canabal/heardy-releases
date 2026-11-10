@@ -11,3 +11,4 @@
 ## Cambios
 - Cuando se publica una versión nueva, la app te pide actualizar con una pantalla completa y un botón que lleva a la página de descargas. Reemplaza al aviso anterior, que se podía cerrar.
 - La descarga es más grande por el motor que separa voces y música: el APK pesa unos 100 MB y el instalador de Windows unos 96 MB.
+- Los mixes hechos en otro dispositivo ya no se intentan descargar de internet desde "En tus otros dispositivos": se marcan como mix y explican que su archivo llega con tu carpeta de Heardy. "Descargar todo" también los salta.
