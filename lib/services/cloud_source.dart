@@ -142,6 +142,9 @@ class CloudLibrary {
   final List<Map<String, dynamic>> remoteTracks;
   final List<Map<String, dynamic>> playlistRemoteTracks;
 
+  /// Artistas seguidos, con las bajas (`unfollowedAt`) para que se propaguen.
+  final List<Map<String, dynamic>> followedArtists;
+
   const CloudLibrary({
     required this.version,
     required this.songs,
@@ -150,6 +153,7 @@ class CloudLibrary {
     this.onlinePlaylists = const [],
     this.remoteTracks = const [],
     this.playlistRemoteTracks = const [],
+    this.followedArtists = const [],
   });
 
   /// `GET /library` es asimétrico con `PUT /library` a propósito de cómo
@@ -165,7 +169,7 @@ class CloudLibrary {
   ///
   /// Un servidor anterior a las playlists online no manda `kind` ni las dos
   /// listas remotas: sin `kind` una playlist es local, y las listas ausentes
-  /// quedan vacías.
+  /// quedan vacías. Igual con `followedArtists` en un servidor sin migrar.
   factory CloudLibrary.fromJson(Map<String, dynamic> json) {
     final allPlaylists = _camelCaseRows(json['playlists'], const {
       'playlist_id': 'playlistId',
@@ -180,6 +184,7 @@ class CloudLibrary {
         'file_hash': 'fileHash',
         'hash_kind': 'hashKind',
         'source_url': 'sourceUrl',
+        'is_mix': 'isMix',
       }),
       playlists: [
         for (final row in allPlaylists)
@@ -205,6 +210,7 @@ class CloudLibrary {
         'video_id': 'videoId',
         'order_index': 'orderIndex',
       }),
+      followedArtists: _camelCaseRows(json['followedArtists'], const {}),
     );
   }
 
@@ -336,6 +342,8 @@ abstract class CloudSource {
 
   Future<CloudLibraryOrNotModified> getLibrary({String? ifNoneMatchVersion});
 
+  /// [onFollowedArtistsSkipped] avisa de que la subida salió bien pero sin
+  /// [followedArtists], porque el servidor no los acepta todavía.
   Future<int> pushLibrary({
     required int baseVersion,
     String? contentHash,
@@ -344,6 +352,8 @@ abstract class CloudSource {
     required List<Map<String, dynamic>> playlistSongs,
     List<Map<String, dynamic>> remoteTracks = const [],
     List<Map<String, dynamic>> playlistRemoteTracks = const [],
+    List<Map<String, dynamic>> followedArtists = const [],
+    void Function()? onFollowedArtistsSkipped,
   });
 
   Future<HistoryPushResult> pushHistory(List<Map<String, dynamic>> rows, {int? utcOffsetMinutes});

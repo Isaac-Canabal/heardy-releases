@@ -1,5 +1,7 @@
 package com.heardy.app
 
+import android.app.ActivityManager
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -9,6 +11,8 @@ import java.util.concurrent.Executors
 
 class MainActivity: AudioServiceActivity() {
     private val waveformExecutor = Executors.newSingleThreadExecutor()
+    // El Mix DJ decodifica y codifica en serie, fuera del hilo principal.
+    private val mixExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val volumeLeveler = VolumeLeveler()
     private val multicastLock by lazy { MulticastLockHolder(this) }
@@ -64,9 +68,53 @@ class MainActivity: AudioServiceActivity() {
                     }
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "heardy/mix")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "totalMemory" -> {
+                        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        val info = ActivityManager.MemoryInfo()
+                        am.getMemoryInfo(info)
+                        result.success(info.totalMem)
+                    }
+                    "cancel" -> {
+                        call.argument<String>("job")?.let { MixCodec.cancel(it) }
+                        result.success(null)
+                    }
+                    "decode", "encodeAac" -> {
+                        val job = call.argument<String>("job")
+                        if (job == null) {
+                            result.error("bad_args", "falta job", null)
+                            return@setMethodCallHandler
+                        }
+                        val appContext = applicationContext
+                        mixExecutor.execute {
+                            try {
+                                val value: Any? = if (call.method == "decode") {
+                                    MixCodec.decode(appContext, call.argument<String>("uri")!!,
+                                        call.argument<String>("out")!!, job)
+                                } else {
+                                    MixCodec.encodeAac(call.argument<String>("in")!!, call.argument<String>("out")!!,
+                                        call.argument<Int>("bitrate") ?: 192_000,
+                                        call.argument<Double>("gainDb") ?: 0.0, job)
+                                    null
+                                }
+                                mainHandler.post { result.success(value) }
+                            } catch (e: AudioDecodeLoop.Cancelled) {
+                                mainHandler.post { result.error("cancelled", "cancelado", null) }
+                            } catch (e: Exception) {
+                                // Solo el tipo: el mensaje puede llevar rutas.
+                                mainHandler.post { result.error("codec_failed", e.javaClass.simpleName, null) }
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     override fun onDestroy() {
+        mixExecutor.shutdown()
         waveformExecutor.shutdown()
         volumeLeveler.disable()
         multicastLock.release()

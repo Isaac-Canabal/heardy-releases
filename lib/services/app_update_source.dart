@@ -10,12 +10,16 @@ class AppUpdateInfo {
   final String name;
   final String htmlUrl;
   final String body;
+  final bool draft;
+  final bool prerelease;
 
   const AppUpdateInfo({
     required this.tag,
     required this.name,
     required this.htmlUrl,
     required this.body,
+    this.draft = false,
+    this.prerelease = false,
   });
 
   factory AppUpdateInfo.fromJson(Map<String, dynamic> json) => AppUpdateInfo(
@@ -23,6 +27,8 @@ class AppUpdateInfo {
         name: (json['name'] ?? json['tag_name'] ?? '').toString(),
         htmlUrl: (json['html_url'] ?? '').toString(),
         body: (json['body'] ?? '').toString(),
+        draft: json['draft'] == true,
+        prerelease: json['prerelease'] == true,
       );
 }
 
@@ -110,7 +116,10 @@ class GithubAppUpdateSource implements AppUpdateSource {
       if (response.statusCode != 200) return null;
       final json = jsonDecode(response.body) as Map<String, dynamic>;
       final info = AppUpdateInfo.fromJson(json);
-      return info.tag.isEmpty ? null : info;
+      // `/releases/latest` ya excluye borradores y prereleases; se filtra
+      // igual porque de este valor depende bloquear la app (`UpdateGate`).
+      if (info.draft || info.prerelease || !isValidReleaseTag(info.tag)) return null;
+      return info;
     } catch (e) {
       appLog('GithubAppUpdateSource: no se pudo consultar el último release: $e');
       return null;

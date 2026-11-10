@@ -4,8 +4,7 @@ import '../l10n/app_localizations.dart';
 import '../services/audio_player_handler.dart';
 import '../services/playback_speed_logic.dart';
 import '../services/repeat_count_logic.dart';
-
-const _accent = Color(0xFF8C9EFF);
+import '../theme/app_theme.dart';
 
 void _showSheet(BuildContext context, WidgetBuilder builder) {
   showModalBottomSheet(
@@ -46,7 +45,7 @@ void showRepeatCountSheet(BuildContext context, AudioPlayerHandler handler) {
                     ? l10n.repeatCountRemaining(remaining)
                     : l10n.repeatCountBody,
                 style: TextStyle(
-                  color: remaining > 0 ? _accent : Colors.white54,
+                  color: remaining > 0 ? AppTheme.playerAccent : Colors.white54,
                 ),
               ),
             ),
@@ -192,7 +191,7 @@ class _RateSlider extends StatelessWidget {
             Text(label, style: const TextStyle(color: Colors.white70)),
             Text(
               playbackRateLabel(value),
-              style: const TextStyle(color: _accent),
+              style: TextStyle(color: AppTheme.playerAccent),
             ),
           ],
         ),
@@ -202,7 +201,7 @@ class _RateSlider extends StatelessWidget {
           max: maxPlaybackRate,
           divisions: ((maxPlaybackRate - minPlaybackRate) / playbackRateStep)
               .round(),
-          activeColor: _accent,
+          activeColor: AppTheme.playerAccent,
           onChanged: onChanged,
         ),
       ],

@@ -46,6 +46,27 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
     if (text != null) messenger.showSnackBar(SnackBar(content: Text(text)));
   }
 
+  Future<void> _ignoreOne(CloudLibraryEntry entry) async {
+    final l10n = AppLocalizations.of(context)!;
+    final messenger = ScaffoldMessenger.of(context);
+    final folder = context.read<FolderSyncProvider>();
+    final cloud = context.read<CloudLibraryProvider>();
+    await folder.ignoreRecommendation(entry.song);
+    cloud.setIgnoredHashes(folder.ignoredHashes);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        content: Text(l10n.ignoredRecsIgnoredSnack),
+        action: SnackBarAction(
+          label: l10n.ignoredRecsUndo,
+          onPressed: () async {
+            await folder.restoreRecommendation(entry.fileHash);
+            cloud.setIgnoredHashes(folder.ignoredHashes);
+          },
+        ),
+      ));
+  }
+
   Future<void> _downloadAll() async {
     final l10n = AppLocalizations.of(context)!;
     final provider = context.read<CloudLibraryProvider>();
@@ -146,13 +167,25 @@ class _CloudLibraryScreenState extends State<CloudLibraryScreen> {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white54, fontSize: 12),
                 ),
-                trailing: entry.queued
-                    ? Text(l10n.cloudLibQueued, style: const TextStyle(color: Colors.white54, fontSize: 12))
-                    : IconButton(
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (entry.queued)
+                      Text(l10n.cloudLibQueued, style: const TextStyle(color: Colors.white54, fontSize: 12))
+                    else
+                      IconButton(
                         tooltip: l10n.cloudLibDownload,
                         icon: const Icon(Icons.download_rounded, color: Colors.white70),
                         onPressed: () => _downloadOne(entry),
                       ),
+                    IconButton(
+                      key: Key('ignore_${entry.fileHash}'),
+                      tooltip: l10n.ignoredRecsIgnoreTooltip,
+                      icon: const Icon(Icons.visibility_off_outlined, color: Colors.white54),
+                      onPressed: () => _ignoreOne(entry),
+                    ),
+                  ],
+                ),
               );
             },
           ),

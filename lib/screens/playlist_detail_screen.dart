@@ -11,6 +11,7 @@ import '../widgets/desktop_shell_scope.dart';
 import '../widgets/song_tile.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/playlist_target_sheet.dart';
+import 'heardy_mixer_screen.dart';
 import 'online_playlist_detail_screen.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
@@ -599,6 +600,12 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
               title: Text(l10n.playlistChangePosition, style: const TextStyle(color: Colors.white)),
               onTap: () => Navigator.pop(sheetContext, 'position'),
             ),
+            ListTile(
+              key: const Key('song_action_mix'),
+              leading: const Icon(Icons.multitrack_audio_rounded, color: Colors.white70),
+              title: Text(l10n.mixerMixWith, style: const TextStyle(color: Colors.white)),
+              onTap: () => Navigator.pop(sheetContext, 'mix'),
+            ),
             const SizedBox(height: 8),
           ],
         ),
@@ -661,6 +668,9 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           _sortBy = 'manual';
         });
         await musicProvider.reorderSongsInPlaylist(widget.playlistId, orderedIds);
+        break;
+      case 'mix':
+        await Navigator.of(context).push(HeardyMixerScreen.route(preselectA: song));
         break;
     }
   }

@@ -1,13 +1,64 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/nav_tab.dart';
+import '../models/now_playing_layout.dart';
 import '../services/explore_logic.dart';
 import '../services/official_server.dart';
 import '../l10n/app_localizations.dart';
+import '../theme/app_fonts.dart';
+import '../theme/area_colors.dart';
 
 enum AppThemePreset { navy, violet, rose, green, orange, red, custom }
 
 enum AppLanguage { es, en }
+
+/// Secciones de Ajustes en su orden predeterminado. Los nombres se guardan en
+/// preferencias: renombrar uno le hace perder al usuario su posición.
+enum SettingsSectionId {
+  account,
+  folderSync,
+  lanSync,
+  ignoredRecommendations,
+  statistics,
+  storage,
+  appearance,
+  language,
+  playlistOrder,
+  localLibrary,
+  audio,
+  search,
+  support,
+  about,
+}
+
+/// Orden efectivo de [known] (los nombres en su orden predeterminado) a partir
+/// de lo guardado, que puede venir de otra versión o estar corrupto: se quitan
+/// duplicados y nombres desconocidos, y una sección ausente se coloca justo
+/// tras la que la precede por defecto, para que ninguna se pierda nunca.
+List<String> resolveSectionOrder(Object? stored, List<String> known) {
+  final order = <String>[];
+  if (stored is List) {
+    for (final name in stored) {
+      if (name is String && known.contains(name) && !order.contains(name)) order.add(name);
+    }
+  }
+  if (order.isEmpty) return [...known];
+  for (final (index, name) in known.indexed) {
+    if (order.contains(name)) continue;
+    order.insert(index == 0 ? 0 : order.indexOf(known[index - 1]) + 1, name);
+  }
+  return order;
+}
+
+/// [resolveSectionOrder] para un enum: [defaults] es su orden predeterminado.
+List<T> resolveEnumOrder<T extends Enum>(Object? stored, List<T> defaults) {
+  final byName = defaults.asNameMap();
+  return List.unmodifiable(
+    resolveSectionOrder(stored, [for (final value in defaults) value.name]).map((name) => byName[name]!),
+  );
+}
 
 class SettingsProvider with ChangeNotifier {
   static const _presetKey = 'theme_preset';
@@ -33,6 +84,20 @@ class SettingsProvider with ChangeNotifier {
   static const _legalAcceptedAtKey = 'legal_accepted_at';
   static const _exploreHiddenKey = 'explore_hidden_shelves';
   static const _exploreCountryKey = 'explore_country';
+  static const _areaColorsKey = 'area_colors';
+  static const appFontKey = 'app_font';
+  static const textScaleKey = 'app_text_scale';
+  static const lyricsTextScaleKey = 'lyrics_text_scale';
+  static const settingsSectionOrderKey = 'settings_section_order';
+  static const exploreShelfOrderKey = 'explore_shelf_order';
+  static const navTabOrderKey = 'nav_tab_order';
+  static const startTabKey = 'start_tab';
+  static const lastTabKey = 'last_tab';
+  static const nowPlayingTitleAlignKey = 'now_playing_title_align';
+  static const nowPlayingArtSizeKey = 'now_playing_art_size';
+  static const showSeekButtonsKey = 'now_playing_seek_buttons';
+  static const nowPlayingBlockOrderKey = 'now_playing_block_order';
+  static const desktopPanelSideKey = 'desktop_panel_side';
 
   AppThemePreset _preset = AppThemePreset.navy;
   bool _loaded = false;
@@ -54,6 +119,22 @@ class SettingsProvider with ChangeNotifier {
   String? _legalAcceptedVersion;
   Set<ExploreShelfId> _exploreHidden = {};
   String? _exploreCountry;
+  Map<ColorArea, Color> _areaColors = {};
+  bool _areaColorsSaving = false;
+  bool _areaColorsDirty = false;
+  AppFont _appFont = AppFont.system;
+  AppTextScale _textScale = AppTextScale.normal;
+  AppTextScale _lyricsTextScale = AppTextScale.normal;
+  List<SettingsSectionId> _settingsSectionOrder = SettingsSectionId.values;
+  List<ExploreShelfId> _exploreShelfOrder = kDefaultExploreShelfOrder;
+  List<NavTabId> _navTabOrder = NavTabId.values;
+  NavTabId? _startTab = kDefaultStartTab;
+  NavTabId? _lastTab;
+  NowPlayingTitleAlign _nowPlayingTitleAlign = NowPlayingTitleAlign.center;
+  NowPlayingArtSize _nowPlayingArtSize = NowPlayingArtSize.medium;
+  bool _showSeekButtons = true;
+  List<NowPlayingBlock> _nowPlayingBlockOrder = NowPlayingBlock.values;
+  DesktopPanelSide _desktopPanelSide = DesktopPanelSide.right;
 
   AppThemePreset get preset => _preset;
   bool get isLoaded => _loaded;
@@ -74,6 +155,43 @@ class SettingsProvider with ChangeNotifier {
 
   /// País elegido para las listas regionales de Explorar; null = el del dispositivo.
   String? get exploreCountry => _exploreCountry;
+
+  /// Colores elegidos por zona. Una zona ausente sigue el tema.
+  Map<ColorArea, Color> get areaColors => Map.unmodifiable(_areaColors);
+  Color? areaColor(ColorArea area) => _areaColors[area];
+
+  AppFont get appFont => _appFont;
+  AppTextScale get textScale => _textScale;
+
+  /// Aparte de [textScale]: sólo la vista de letras de canciones.
+  AppTextScale get lyricsTextScale => _lyricsTextScale;
+
+  List<SettingsSectionId> get settingsSectionOrder => _settingsSectionOrder;
+
+  /// Orden visual de Explorar: incluye las ocultas y no influye en qué se pide
+  /// a la red.
+  List<ExploreShelfId> get exploreShelfOrder => _exploreShelfOrder;
+
+  List<NavTabId> get navTabOrder => _navTabOrder;
+
+  /// null es "Última usada".
+  NavTabId? get startTab => _startTab;
+
+  /// Con qué pestaña abre la app.
+  NavTabId get initialTab => resolveInitialTab(_startTab, _lastTab);
+
+  NowPlayingTitleAlign get nowPlayingTitleAlign => _nowPlayingTitleAlign;
+  NowPlayingArtSize get nowPlayingArtSize => _nowPlayingArtSize;
+  bool get showSeekButtons => _showSeekButtons;
+  List<NowPlayingBlock> get nowPlayingBlockOrder => _nowPlayingBlockOrder;
+  DesktopPanelSide get desktopPanelSide => _desktopPanelSide;
+
+  bool get nowPlayingLayoutIsDefault =>
+      _nowPlayingTitleAlign == NowPlayingTitleAlign.center &&
+      _nowPlayingArtSize == NowPlayingArtSize.medium &&
+      _showSeekButtons &&
+      listEquals(_nowPlayingBlockOrder, NowPlayingBlock.values) &&
+      _desktopPanelSide == DesktopPanelSide.right;
 
   /// Versión de los textos legales que el usuario aceptó en esta instalación;
   /// `null` si nunca. Ver legal_texts.dart.
@@ -148,6 +266,34 @@ class SettingsProvider with ChangeNotifier {
     _legalAcceptedVersion = prefs.getString(_legalAcceptedVersionKey);
     _exploreHidden = parseHiddenShelves(prefs.getStringList(_exploreHiddenKey));
     _exploreCountry = normalizeExploreCountry(prefs.getString(_exploreCountryKey));
+    _areaColors = parseAreaColors(prefs.getString(_areaColorsKey));
+    _appFont = parseAppFont(prefs.getString(appFontKey));
+    _textScale = parseAppTextScale(prefs.getString(textScaleKey));
+    _lyricsTextScale = parseAppTextScale(prefs.getString(lyricsTextScaleKey));
+    // `get`, no `getStringList`: un valor de otro tipo lanzaría y dejaría la
+    // carga a medias.
+    _settingsSectionOrder = resolveEnumOrder(prefs.get(settingsSectionOrderKey), SettingsSectionId.values);
+    _exploreShelfOrder = resolveEnumOrder(prefs.get(exploreShelfOrderKey), kDefaultExploreShelfOrder);
+    _navTabOrder = resolveEnumOrder(prefs.get(navTabOrderKey), NavTabId.values);
+    _startTab = parseStartTab(prefs.get(startTabKey));
+    _lastTab = parseNavTab(prefs.get(lastTabKey));
+    _nowPlayingTitleAlign = parseStoredEnum(
+      prefs.get(nowPlayingTitleAlignKey),
+      NowPlayingTitleAlign.values,
+      NowPlayingTitleAlign.center,
+    );
+    _nowPlayingArtSize = parseStoredEnum(
+      prefs.get(nowPlayingArtSizeKey),
+      NowPlayingArtSize.values,
+      NowPlayingArtSize.medium,
+    );
+    _showSeekButtons = parseStoredBool(prefs.get(showSeekButtonsKey), fallback: true);
+    _nowPlayingBlockOrder = resolveEnumOrder(prefs.get(nowPlayingBlockOrderKey), NowPlayingBlock.values);
+    _desktopPanelSide = parseStoredEnum(
+      prefs.get(desktopPanelSideKey),
+      DesktopPanelSide.values,
+      DesktopPanelSide.right,
+    );
     _loaded = true;
     notifyListeners();
   }
@@ -196,6 +342,162 @@ class SettingsProvider with ChangeNotifier {
       await prefs.remove(_exploreCountryKey);
     } else {
       await prefs.setString(_exploreCountryKey, c);
+    }
+  }
+
+  Future<void> setAppFont(AppFont font) async {
+    _appFont = font;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(appFontKey, font.name);
+  }
+
+  Future<void> setTextScale(AppTextScale scale) async {
+    _textScale = scale;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(textScaleKey, scale.name);
+  }
+
+  Future<void> setLyricsTextScale(AppTextScale scale) async {
+    _lyricsTextScale = scale;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(lyricsTextScaleKey, scale.name);
+  }
+
+  Future<void> setSettingsSectionOrder(List<SettingsSectionId> order) async {
+    _settingsSectionOrder = resolveEnumOrder([for (final id in order) id.name], SettingsSectionId.values);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      settingsSectionOrderKey,
+      [for (final id in _settingsSectionOrder) id.name],
+    );
+  }
+
+  Future<void> setExploreShelfOrder(List<ExploreShelfId> order) async {
+    _exploreShelfOrder = resolveEnumOrder([for (final id in order) id.name], kDefaultExploreShelfOrder);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(exploreShelfOrderKey, [for (final id in _exploreShelfOrder) id.name]);
+  }
+
+  Future<void> setNavTabOrder(List<NavTabId> order) async {
+    _navTabOrder = resolveEnumOrder([for (final id in order) id.name], NavTabId.values);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(navTabOrderKey, [for (final id in _navTabOrder) id.name]);
+  }
+
+  /// [tab] null es "Última usada".
+  Future<void> setStartTab(NavTabId? tab) async {
+    _startTab = tab;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(startTabKey, serializeStartTab(tab));
+  }
+
+  /// Se guarda siempre, aunque la pestaña inicial sea fija, para que elegir
+  /// "Última usada" funcione desde el primer arranque. Sin aviso: no cambia
+  /// nada en pantalla.
+  Future<void> rememberLastTab(NavTabId tab) async {
+    if (_lastTab == tab) return;
+    _lastTab = tab;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(lastTabKey, tab.name);
+  }
+
+  Future<void> setNowPlayingTitleAlign(NowPlayingTitleAlign align) async {
+    _nowPlayingTitleAlign = align;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(nowPlayingTitleAlignKey, align.name);
+  }
+
+  Future<void> setNowPlayingArtSize(NowPlayingArtSize size) async {
+    _nowPlayingArtSize = size;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(nowPlayingArtSizeKey, size.name);
+  }
+
+  Future<void> setShowSeekButtons(bool show) async {
+    _showSeekButtons = show;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(showSeekButtonsKey, show);
+  }
+
+  Future<void> setNowPlayingBlockOrder(List<NowPlayingBlock> order) async {
+    _nowPlayingBlockOrder = resolveEnumOrder([for (final block in order) block.name], NowPlayingBlock.values);
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(nowPlayingBlockOrderKey, [for (final block in _nowPlayingBlockOrder) block.name]);
+  }
+
+  Future<void> setDesktopPanelSide(DesktopPanelSide side) async {
+    _desktopPanelSide = side;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(desktopPanelSideKey, side.name);
+  }
+
+  Future<void> resetNowPlayingLayout() async {
+    _nowPlayingTitleAlign = NowPlayingTitleAlign.center;
+    _nowPlayingArtSize = NowPlayingArtSize.medium;
+    _showSeekButtons = true;
+    _nowPlayingBlockOrder = NowPlayingBlock.values;
+    _desktopPanelSide = DesktopPanelSide.right;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(nowPlayingTitleAlignKey);
+    await prefs.remove(nowPlayingArtSizeKey);
+    await prefs.remove(showSeekButtonsKey);
+    await prefs.remove(nowPlayingBlockOrderKey);
+    await prefs.remove(desktopPanelSideKey);
+  }
+
+  /// `null` devuelve la zona al tema. Se llama en cada paso del arrastre del
+  /// selector, así que la pantalla cambia al instante y el disco no se satura.
+  Future<void> setAreaColor(ColorArea area, Color? color) async {
+    final argb = color == null ? null : color.toARGB32() | 0xFF000000;
+    if (argb == _areaColors[area]?.toARGB32()) return;
+    _areaColors = {..._areaColors};
+    if (argb == null) {
+      _areaColors.remove(area);
+    } else {
+      _areaColors[area] = Color(argb);
+    }
+    notifyListeners();
+    await _saveAreaColors();
+  }
+
+  Future<void> resetAreaColors() async {
+    if (_areaColors.isEmpty) return;
+    _areaColors = {};
+    notifyListeners();
+    await _saveAreaColors();
+  }
+
+  /// Una sola escritura a la vez, y al terminar se repite si hubo cambios: dos
+  /// escrituras simultáneas podrían dejar en disco la más vieja.
+  Future<void> _saveAreaColors() async {
+    _areaColorsDirty = true;
+    if (_areaColorsSaving) return;
+    _areaColorsSaving = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      while (_areaColorsDirty) {
+        _areaColorsDirty = false;
+        if (_areaColors.isEmpty) {
+          await prefs.remove(_areaColorsKey);
+        } else {
+          await prefs.setString(_areaColorsKey, serializeAreaColors(_areaColors));
+        }
+      }
+    } finally {
+      _areaColorsSaving = false;
     }
   }
 

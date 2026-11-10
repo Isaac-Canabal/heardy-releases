@@ -50,8 +50,18 @@ class CloudLibraryProvider extends ChangeNotifier {
 
   CloudLibraryStatus _status = CloudLibraryStatus.idle;
   Object? _error;
-  List<Map<String, dynamic>> _songs = const [];
+  List<Map<String, dynamic>> _allSongs = const [];
+  Set<String> _ignoredHashes = const {};
   final Set<String> _queuedHashes = {};
+
+  /// Lo de la nube sin lo que el usuario ignoró en este dispositivo.
+  List<Map<String, dynamic>> get _songs => filterIgnoredRecommendations(_allSongs, _ignoredHashes);
+
+  /// Aplica al momento un cambio en las ignoradas sin volver a pedir la nube.
+  void setIgnoredHashes(Set<String> hashes) {
+    _ignoredHashes = hashes;
+    notifyListeners();
+  }
 
   CloudLibraryStatus get status => _status;
 
@@ -73,7 +83,7 @@ class CloudLibraryProvider extends ChangeNotifier {
     try {
       final account = await _cloud.getAccount();
       if (!account.hasLibrary) {
-        _songs = const [];
+        _allSongs = const [];
         _status = CloudLibraryStatus.noLibrary;
         return;
       }
@@ -83,7 +93,8 @@ class CloudLibraryProvider extends ChangeNotifier {
         library?.playlists ?? const [],
         library?.playlistSongs ?? const [],
       );
-      _songs = cloudOnlySongs(
+      _ignoredHashes = {for (final r in await _db.getIgnoredRecommendations()) r.fileHash};
+      _allSongs = cloudOnlySongs(
         canonical.songs,
         localFileHashes: await _db.getAllLocalFileHashes(),
         localSourceUrls: await _db.getAllLocalSourceUrls(),
@@ -92,7 +103,7 @@ class CloudLibraryProvider extends ChangeNotifier {
       _status = CloudLibraryStatus.ready;
     } catch (e) {
       debugPrint('CloudLibraryProvider: refresh falló (${e.runtimeType})');
-      _songs = const [];
+      _allSongs = const [];
       _error = e;
       _status = CloudLibraryStatus.error;
     } finally {

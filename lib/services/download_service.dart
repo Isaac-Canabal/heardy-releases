@@ -147,7 +147,7 @@ class DownloadService {
       // autodescriptivo en disco: si el usuario lo copia a otro reproductor,
       // o si un día borra la base de datos y reescanea, la metadata
       // sobrevive porque vive en el propio contenedor, no solo en SQLite.
-      await _writeTags(tempFile, track, coverBytes);
+      await _writeTags(tempFile, title: track.title, artist: track.artist, album: track.album, cover: coverBytes);
       _throwIfCancelled(isCancelled);
 
       // 4. Carpeta destino.
@@ -167,7 +167,7 @@ class DownloadService {
       // 5-6. Pegar. Se usa SIEMPRE la uri devuelta: ante una colisión de
       // nombre el proveedor de documentos renombra por su cuenta, así que
       // reconstruirla a mano daría una uri que no existe.
-      final fileName = _fileNameFor(track);
+      final fileName = _fileNameFor(track.artist, track.title, track.id);
       final newFile = await _libraryStorage.pasteLocalFile(
         tempPath,
         folderUri,
@@ -269,6 +269,101 @@ class DownloadService {
     }
   }
 
+  /// Guarda en la biblioteca un .m4a que ya está en almacenamiento privado (un
+  /// mix de Heardy Mixer) por el mismo camino que una descarga: copia temporal
+  /// con tags, pegado en la carpeta de [playlistId] vía [LibraryStorage],
+  /// identidad recalculada del archivo pegado, deduplicado por hash e inserción
+  /// de una fila normal de `songs`. El original privado no se toca. Con
+  /// [isMix] la fila queda marcada y esa marca viaja en el índice como en
+  /// cualquier otra canción (el audio nunca lo sube Heardy).
+  Future<DownloadResult> importPrivateAudio({
+    required String sourcePath,
+    required String title,
+    required String artist,
+    required int durationSeconds,
+    required String playlistId,
+    Uint8List? coverBytes,
+    bool isMix = false,
+  }) async {
+    final rootUri = await _storage.getLibraryRootUri();
+    if (rootUri == null || !await _storage.hasValidPermission(rootUri)) {
+      throw const DownloadSourceException(
+        DownloadSourceErrorKind.notConfigured,
+        'Elige primero una carpeta de biblioteca en Ajustes',
+      );
+    }
+    final playlist = await _db.getPlaylistById(playlistId);
+    if (playlist == null) {
+      throw const DownloadSourceException(DownloadSourceErrorKind.notFound, 'La playlist ya no existe');
+    }
+    final tempDir = await getTemporaryDirectory();
+    final tempFile = File('${tempDir.path}/heardy_import_${DateTime.now().microsecondsSinceEpoch}.m4a');
+    final track = RemoteTrack(
+      id: '',
+      title: title,
+      artist: artist,
+      album: null,
+      durationSeconds: durationSeconds,
+      thumbnailUrl: '',
+      sourceUrl: '',
+    );
+    try {
+      await File(sourcePath).copy(tempFile.path);
+      await _writeTags(tempFile, title: title, artist: artist, cover: coverBytes);
+
+      final folderUri = await _storage.resolvePlaylistFolder(rootUri, playlist.name);
+      final fileName = _fileNameFor(artist, title, 'mix');
+      final newFile = await _libraryStorage.pasteLocalFile(tempFile.path, folderUri, fileName, 'audio/mp4');
+      final newUri = newFile.uri;
+      final stat = await _libraryStorage.stat(newUri, isDir: false);
+      if (stat == null) {
+        throw const DownloadSourceException(
+          DownloadSourceErrorKind.extraction,
+          'El archivo se escribió pero no se pudo leer de vuelta',
+        );
+      }
+      final identity = await _identity.compute(uri: newUri, length: stat.length, ext: 'm4a', debugName: fileName);
+
+      final existing = await _db.getSongByHash(identity.hash);
+      if (existing != null) {
+        try {
+          await _libraryStorage.delete(newUri, isDir: false);
+        } catch (e) {
+          appLog('DownloadService: no se pudo borrar el duplicado (${e.runtimeType})');
+        }
+        await _addToPlaylist(playlistId, existing.id);
+        if (isMix && !existing.isMix) await _db.markSongAsMix(existing.id);
+        return DownloadResult(DownloadOutcome.alreadyInLibrary, existing.copyWith(isMix: existing.isMix || isMix), track);
+      }
+
+      final artPath = coverBytes == null ? '' : await saveCoverArt(identity.hash, coverBytes);
+      final song = Song(
+        id: identity.hash,
+        title: title,
+        artist: artist,
+        duration: durationSeconds,
+        filePath: '',
+        artPath: artPath,
+        format: 'm4a',
+        downloadDate: DateTime.now(),
+        uri: newUri,
+        fileHash: identity.hash,
+        hashKind: identity.kind,
+        fileSize: stat.length,
+        modifiedAt: stat.lastModified,
+        album: playlist.name,
+        isMix: isMix,
+      );
+      await _db.insertSong(song);
+      await _addToPlaylist(playlistId, song.id);
+      return DownloadResult(DownloadOutcome.inserted, song, track);
+    } finally {
+      try {
+        if (await tempFile.exists()) await tempFile.delete();
+      } catch (_) {}
+    }
+  }
+
   Future<void> _addToPlaylist(String playlistId, String songId) async {
     if (await _db.isSongInPlaylist(playlistId, songId)) return;
     final maxOrder = await _db.getMaxOrderForPlaylist(playlistId) ?? -1;
@@ -297,7 +392,13 @@ class DownloadService {
   Future<bool> _hasArtwork(Song song) async =>
       song.artPath.isNotEmpty && await File(song.artPath).exists();
 
-  Future<void> _writeTags(File file, RemoteTrack track, Uint8List? cover) async {
+  Future<void> _writeTags(
+    File file, {
+    required String title,
+    required String artist,
+    String? album,
+    Uint8List? cover,
+  }) async {
     try {
       // `audio_metadata_reader` reescribe moov/ilst sin recalcular stco, así
       // que hay que guardar el archivo tal cual antes de tocarlo para poder
@@ -305,9 +406,9 @@ class DownloadService {
       final originalBytes = file.readAsBytesSync();
 
       updateMetadata(file, (metadata) {
-        metadata.setTitle(track.title);
-        metadata.setArtist(track.artist);
-        if (track.album != null) metadata.setAlbum(track.album!);
+        metadata.setTitle(title);
+        metadata.setArtist(artist);
+        if (album != null) metadata.setAlbum(album);
         if (cover != null) {
           metadata.setPictures([
             Picture(cover, mimeForImage(cover), PictureType.coverFront),
@@ -326,11 +427,11 @@ class DownloadService {
 
   /// "Artista - Título.m4a", legible desde un explorador de archivos, porque
   /// estos archivos son del usuario y va a verlos.
-  String _fileNameFor(RemoteTrack track) {
-    final artist = _sanitizeSegment(track.artist);
-    final title = _sanitizeSegment(track.title);
+  String _fileNameFor(String rawArtist, String rawTitle, String fallbackId) {
+    final artist = _sanitizeSegment(rawArtist);
+    final title = _sanitizeSegment(rawTitle);
     final stem = artist.isEmpty ? title : '$artist - $title';
-    final safeStem = stem.isEmpty ? _sanitizeId(track.id) : stem;
+    final safeStem = stem.isEmpty ? _sanitizeId(fallbackId) : stem;
     // 120 caracteres deja margen bajo el límite de 255 bytes de la mayoría de
     // sistemas de archivos incluso con acentos en UTF-8.
     final clipped = safeStem.length > 120 ? safeStem.substring(0, 120).trim() : safeStem;

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../models/app_notification.dart';
 import '../providers/notifications_provider.dart';
-import '../services/app_update_source.dart';
 import '../theme/app_theme.dart';
 import '../l10n/app_localizations.dart';
 
@@ -68,7 +66,8 @@ class NotificationsScreen extends StatelessWidget {
       case AppNotificationType.friendRequest:
         return _friendRequestTile(l10n, provider, item);
       case AppNotificationType.appUpdate:
-        return _appUpdateTile(context, l10n, provider, item);
+        // La versión nueva ya no es una fila: bloquea con `UpdateGate`.
+        return const SizedBox.shrink();
     }
   }
 
@@ -100,75 +99,5 @@ class NotificationsScreen extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Widget _appUpdateTile(
-    BuildContext context,
-    AppLocalizations l10n,
-    NotificationsProvider provider,
-    AppNotification item,
-  ) {
-    final info = item.updateInfo!;
-    return Card(
-      color: Colors.white.withValues(alpha: 0.06),
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.system_update_rounded, color: AppTheme.primaryLight),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    l10n.notificationsUpdateTitle(item.title),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
-            ),
-            if (item.body.trim().isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(item.body, style: const TextStyle(color: Colors.white54)),
-            ],
-            const SizedBox(height: 12),
-            // `Wrap`, no `Row`: tres botones con etiquetas de texto no
-            // entran en el ancho de un teléfono angosto — un `Row` sin
-            // `Expanded`/`Flexible` simplemente pinta fuera de los márgenes
-            // de la tarjeta en vez de acomodarse. `Wrap` los pasa a una
-            // segunda línea en vez de desbordar.
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: 4,
-              runSpacing: 4,
-              children: [
-                TextButton(
-                  onPressed: () => provider.dismissUpdate(info.tag),
-                  child: Text(l10n.notificationsDismiss),
-                ),
-                OutlinedButton(
-                  onPressed: info.htmlUrl.isEmpty ? null : () => _openRelease(info.htmlUrl),
-                  child: Text(l10n.notificationsViewRelease),
-                ),
-                FilledButton(
-                  onPressed: () => _openRelease(heardyDownloadsUrl),
-                  child: Text(l10n.notificationsGoToDownloads),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _openRelease(String url) async {
-    final uri = safeExternalUri(url);
-    if (uri == null) return;
-    try {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } catch (_) {}
   }
 }

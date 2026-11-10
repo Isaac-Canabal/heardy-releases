@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/explore.dart';
+import '../models/followed_artist.dart';
 import '../models/song.dart';
 import '../services/database_helper.dart';
 import '../services/download_source.dart';
@@ -52,6 +53,11 @@ class ExploreProvider extends ChangeNotifier {
   DateTime? _lastNetworkRefresh;
   final DateTime Function() _now;
   final Future<List<Song>> Function(String videoId) _localSongsForVideo;
+  final List<FollowedArtist> Function() _followedArtists;
+
+  /// Lanzamientos por canal, para que seguir a alguien cueste una petición y
+  /// no una por cada artista seguido.
+  final Map<String, ({DateTime fetchedAt, List<ExploreAlbum> albums})> _releasesByChannel = {};
 
   ExploreProvider({
     required DownloadSource source,
@@ -61,12 +67,14 @@ class ExploreProvider extends ChangeNotifier {
     Future<List<Map<String, dynamic>>> Function()? topArtistRows,
     DateTime Function()? now,
     Future<List<Song>> Function(String videoId)? localSongsForVideo,
+    List<FollowedArtist> Function()? followedArtists,
   })  : _source = source,
         _db = db ?? DatabaseHelper.instance,
         _country = country ?? deviceExploreCountry,
         _hidden = hiddenShelves ?? (() => const {}),
         _topArtistRows = topArtistRows ?? (db ?? DatabaseHelper.instance).getTopArtistsThisMonth,
         _now = now ?? DateTime.now,
+        _followedArtists = followedArtists ?? (() => const []),
         _localSongsForVideo = localSongsForVideo ??
             ((videoId) async {
               final database = await (db ?? DatabaseHelper.instance).database;
@@ -85,6 +93,7 @@ class ExploreProvider extends ChangeNotifier {
   ShelfState<List<ExploreAlbum>> get newReleases => _typed(ExploreShelfId.newReleases);
   ShelfState<List<ExploreShelf>> get home => _typed(ExploreShelfId.home);
   ShelfState<List<ExploreMoodSection>> get moods => _typed(ExploreShelfId.moods);
+  ShelfState<List<ExploreAlbum>> get followedReleases => _typed(ExploreShelfId.followedReleases);
 
   List<ExploreShelfId> get _visibleNetworkShelves {
     final hidden = _hidden();
@@ -172,6 +181,7 @@ class ExploreProvider extends ChangeNotifier {
     ExploreShelfId.newReleases,
     ExploreShelfId.home,
     ExploreShelfId.moods,
+    ExploreShelfId.followedReleases,
   ];
 
   /// Aplica un cambio de ajustes de Explorar (secciones visibles o país): lo
@@ -197,6 +207,11 @@ class ExploreProvider extends ChangeNotifier {
       case ExploreShelfId.recent:
       case ExploreShelfId.artists:
         return loadLocal();
+      case ExploreShelfId.followed:
+        // Vive en FollowedArtistsProvider: aquí no hay nada que pedir.
+        return Future.value();
+      case ExploreShelfId.followedReleases:
+        return _run<List<ExploreAlbum>>(id, () => _fetchFollowedReleases(fresh: fresh));
       case ExploreShelfId.radio:
         return _run<List<RemoteTrack>>(id, _fetchRadio);
       case ExploreShelfId.charts:
@@ -236,6 +251,43 @@ class ExploreProvider extends ChangeNotifier {
     }
     final local = localVideoIds(await _db.getLocalSourceUrls());
     return mergeRadioTracks(lists, localVideoIds: local);
+  }
+
+  /// Tras cambiar la lista de seguidos. Si la estantería aún no se pidió la
+  /// cargará [loadNetwork]; si ya estaba, [_releasesByChannel] deja el coste en
+  /// el artista recién seguido.
+  Future<void> syncFollowedReleases() {
+    if (_states[ExploreShelfId.followedReleases]!.isIdle) return Future.value();
+    return reloadShelf(ExploreShelfId.followedReleases);
+  }
+
+  Future<List<ExploreAlbum>> _fetchFollowedReleases({required bool fresh}) async {
+    final generation = _generation[ExploreShelfId.followedReleases];
+    final sections = <List<ExploreAlbum>>[];
+    Object? firstError;
+    // En secuencia, como la radio: cada artista es una petición real al servidor.
+    for (final artist in selectFollowedForReleases(_followedArtists())) {
+      // Una carga más nueva la sustituyó: seguir sólo gastaría peticiones.
+      if (generation != _generation[ExploreShelfId.followedReleases]) break;
+      final cached = _releasesByChannel[artist.channelId];
+      if (cached != null && !fresh && !exploreNeedsRefresh(cached.fetchedAt, _now())) {
+        sections.add(cached.albums);
+        continue;
+      }
+      try {
+        final profile = await _source.exploreArtist(artist.channelId);
+        final albums = [...profile.albums, ...profile.singles];
+        _releasesByChannel[artist.channelId] = (fetchedAt: _now(), albums: albums);
+        sections.add(albums);
+      } catch (e) {
+        print('Explorar: no se pudieron pedir las novedades de un artista (${e.runtimeType})');
+        firstError ??= e;
+        if (cached != null) sections.add(cached.albums);
+        if (stopsFollowedReleasesBatch(e)) break;
+      }
+    }
+    if (sections.isEmpty && firstError != null) throw firstError;
+    return mergeFollowedReleases(sections);
   }
 
   Future<void> _run<T>(ExploreShelfId id, Future<T> Function() fetch, {bool silent = false}) async {

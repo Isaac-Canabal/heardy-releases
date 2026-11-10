@@ -72,6 +72,83 @@ flutter {
     source "../.."
 }
 
+// sherpa-onnx (separación de stems del Mix DJ, Apache-2.0) con su ONNX Runtime
+// (MIT): las dos .so de arm64-v8a se extraen al construir del release oficial
+// v2.0.1, fijado por SHA-256 y cacheado en el directorio de Gradle; no se
+// versionan binarios. El .tar.bz2 se trata como no confiable: se verifica antes
+// de abrirlo, solo se sacan esas dos .so por nombre y cada una se vuelve a
+// verificar. Si algo no coincide, el build falla. No hace falta
+// libc++_shared.so: ambas solo enlazan bibliotecas del sistema, y sus segmentos
+// van alineados a 16 KB. Solo arm64-v8a: en otros ABI el Mix DJ no está.
+def sherpaOnnxVersion = "2.0.1"
+def sherpaOnnxArchiveName = "sherpa-onnx-v${sherpaOnnxVersion}-android.tar.bz2"
+def sherpaOnnxArchiveSha256 = "39003753ec293425ed56723ea9b972b98841a490af3311670c3060548d654330"
+def sherpaOnnxLibs = [
+    "libsherpa-onnx-c-api.so": "0eadae93c4d595a26584d7eebde7b397b9a36d01eee3ebc7262e0d34df2fce10",
+    "libonnxruntime.so"      : "33847ad43bffe204699fd4a27f7f3603452a8cdaf2f9a44983a0bc31ffcf2da1",
+]
+def sherpaOnnxCacheDir = new File(gradle.gradleUserHomeDir, "caches/heardy-sherpa-onnx/${sherpaOnnxVersion}")
+def sherpaOnnxJniDir = new File(project.buildDir, "generated/sherpa-onnx/jniLibs")
+
+def sha256Of = { File f ->
+    def md = java.security.MessageDigest.getInstance("SHA-256")
+    f.withInputStream { ins ->
+        byte[] buf = new byte[1 << 16]
+        int n
+        while ((n = ins.read(buf)) > 0) md.update(buf, 0, n)
+    }
+    md.digest().collect { String.format("%02x", it) }.join()
+}
+
+tasks.register("prepareSherpaOnnxJniLibs") {
+    inputs.property("sha256", sherpaOnnxArchiveSha256)
+    inputs.property("libs", sherpaOnnxLibs)
+    outputs.dir(sherpaOnnxJniDir)
+    doLast {
+        def abiDir = new File(sherpaOnnxJniDir, "arm64-v8a")
+        def ready = sherpaOnnxLibs.every { name, sha ->
+            def f = new File(abiDir, name)
+            f.exists() && sha256Of(f) == sha
+        }
+        if (ready) return
+        def archive = new File(sherpaOnnxCacheDir, sherpaOnnxArchiveName)
+        if (archive.exists() && sha256Of(archive) != sherpaOnnxArchiveSha256) archive.delete()
+        if (!archive.exists()) {
+            sherpaOnnxCacheDir.mkdirs()
+            def part = new File(sherpaOnnxCacheDir, sherpaOnnxArchiveName + ".part")
+            def url = new URL("https://github.com/k2-fsa/sherpa-onnx/releases/download/v${sherpaOnnxVersion}/${sherpaOnnxArchiveName}")
+            logger.lifecycle("Descargando ${url}")
+            url.withInputStream { ins -> part.withOutputStream { it << ins } }
+            def got = sha256Of(part)
+            if (got != sherpaOnnxArchiveSha256) {
+                part.delete()
+                throw new GradleException("${sherpaOnnxArchiveName}: SHA-256 ${got} no coincide con el fijado")
+            }
+            if (!part.renameTo(archive)) throw new GradleException("no se pudo mover ${part}")
+        }
+        project.delete(sherpaOnnxJniDir)
+        abiDir.mkdirs()
+        project.copy {
+            from(project.tarTree(project.resources.bzip2(archive))) {
+                include sherpaOnnxLibs.keySet().collect { "**/jniLibs/arm64-v8a/${it}" }
+                eachFile { it.path = it.name }
+                includeEmptyDirs = false
+            }
+            into abiDir
+        }
+        sherpaOnnxLibs.each { name, sha ->
+            def f = new File(abiDir, name)
+            if (!f.exists() || sha256Of(f) != sha) {
+                project.delete(sherpaOnnxJniDir)
+                throw new GradleException("${name} de ${sherpaOnnxArchiveName} falta o no coincide con el hash fijado")
+            }
+        }
+    }
+}
+
+android.sourceSets.main.jniLibs.srcDirs += sherpaOnnxJniDir
+tasks.named("preBuild") { dependsOn("prepareSherpaOnnxJniLibs") }
+
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib:2.2.20"
     // _nio: NewPipeExtractor (heardy_yt_stream) uses java.nio.file below API 33.

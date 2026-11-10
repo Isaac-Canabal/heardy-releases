@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -9,17 +8,21 @@ import 'package:audio_service/audio_service.dart';
 import 'package:palette_generator/palette_generator.dart';
 import '../services/audio_effects_service.dart';
 import 'equalizer_screen.dart';
+import '../models/now_playing_layout.dart';
 import '../services/audio_player_handler.dart';
 import '../services/cover_color.dart';
 import '../services/explore_logic.dart';
 import '../services/playback_speed_logic.dart';
 import '../services/sleep_timer_logic.dart';
 import '../widgets/add_current_track.dart';
+import '../widgets/marquee_title.dart';
 import '../services/lyrics_logic.dart';
 import '../services/lyrics_service.dart';
 import '../services/translation_service.dart';
 import '../providers/settings_provider.dart';
+import '../theme/app_fonts.dart';
 import '../theme/app_theme.dart';
+import '../theme/area_colors.dart';
 import '../widgets/max_width_center.dart';
 import '../widgets/playback_options_sheet.dart';
 import '../l10n/app_localizations.dart';
@@ -114,7 +117,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   @override
   Widget build(BuildContext context) {
     final audioHandler = Provider.of<AudioPlayerHandler>(context);
-    context.watch<SettingsProvider>();
+    final settings = context.watch<SettingsProvider>();
+    final controls = resolvePlaybackControlColors(
+      settings.areaColor(ColorArea.playbackControls),
+      accent: AppTheme.playerAccent,
+    );
     final l10n = AppLocalizations.of(context)!;
 
     return Scaffold(
@@ -198,9 +205,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                             child: Container(
                               width: 8,
                               height: 8,
-                              decoration: const BoxDecoration(
+                              decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: Color(0xFF8C9EFF),
+                                color: AppTheme.playerAccent,
                               ),
                             ),
                           ),
@@ -256,290 +263,29 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
               child: MaxWidthCenter(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
-                    // El arte fijo a 300px podía desbordar: horizontalmente en
-                    // pantallas angostas (300 + 64 de padding = 364, más ancho
-                    // que muchos Android reales de 360dp) y verticalmente en
-                    // pantallas bajas, donde esta Column con spaceEvenly no
-                    // tenía margen para acomodarlo. Se limita al menor entre el
-                    // máximo original y lo que realmente entra en esta pantalla.
-                    final artSize = math.min(
-                      300.0,
-                      math.min(
-                        constraints.maxWidth - 64,
-                        constraints.maxHeight * 0.38,
-                      ),
+                    final artSize = phoneArtSize(
+                      settings.nowPlayingArtSize,
+                      maxWidth: constraints.maxWidth,
+                      maxHeight: constraints.maxHeight,
+                      textScale: MediaQuery.textScalerOf(context).scale(1),
                     );
                     return Column(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
-                        // 1. Prominent album cover
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 32.0),
-                          child: Card(
-                            elevation: 16,
-                            shadowColor: _dominantColor.withValues(alpha: 0.3),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(20),
+                        for (final block in settings.nowPlayingBlockOrder)
+                          KeyedSubtree(
+                            key: ValueKey(block),
+                            child: _buildBlock(
+                              context,
+                              block,
+                              audioHandler: audioHandler,
+                              mediaItem: mediaItem,
+                              settings: settings,
+                              controls: controls,
+                              l10n: l10n,
+                              artSize: artSize,
                             ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(20),
-                              child: _buildAlbumArt(mediaItem, artSize),
-                            ),
                           ),
-                        ),
-
-                        // 2. Track information
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                          child: Column(
-                            children: [
-                              Text(
-                                mediaItem.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 22,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              ArtistLink(
-                                label: mediaItem.artist ?? l10n.commonUnknownArtist,
-                                busy: _openingArtist,
-                                onTap: (mediaItem.artist ?? '').trim().isEmpty
-                                    ? null
-                                    : () => _openArtist(mediaItem.artist!),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // 3. Quick Action Buttons
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              ElevatedButton.icon(
-                                icon: const Icon(
-                                  Icons.lyrics_outlined,
-                                  size: 18,
-                                  color: Colors.white,
-                                ),
-                                label: Text(
-                                  l10n.nowPlayingLyricsButton,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.white.withValues(
-                                    alpha: 0.08,
-                                  ),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 10,
-                                  ),
-                                ),
-                                onPressed: () => _showLyricsBottomSheet(
-                                  context,
-                                  audioHandler,
-                                  mediaItem,
-                                  _dominantColor,
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              ElevatedButton.icon(
-                                icon: const Icon(
-                                  Icons.queue_music,
-                                  size: 18,
-                                  color: Colors.white,
-                                ),
-                                label: Text(
-                                  l10n.nowPlayingQueueButton,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.white.withValues(
-                                    alpha: 0.08,
-                                  ),
-                                  elevation: 0,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 20,
-                                    vertical: 10,
-                                  ),
-                                ),
-                                onPressed: () => _showQueueBottomSheet(
-                                  context,
-                                  audioHandler,
-                                ),
-                              ),
-                              if (showsPhoneAddButton(mediaItem)) ...[
-                                const SizedBox(width: 16),
-                                ElevatedButton.icon(
-                                  key: const Key('now_playing_add_button'),
-                                  icon: const Icon(
-                                    Icons.playlist_add,
-                                    size: 18,
-                                    color: Colors.white,
-                                  ),
-                                  label: Text(
-                                    l10n.nowPlayingAddButton,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.white.withValues(
-                                      alpha: 0.08,
-                                    ),
-                                    elevation: 0,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                      vertical: 10,
-                                    ),
-                                  ),
-                                  onPressed: () => _addCurrent(mediaItem),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-
-                        // 4. Seek Bar
-                        WaveformSeekSection(
-                          mediaItem: mediaItem,
-                          positionStream: audioHandler.player.positionStream,
-                          onSeek: audioHandler.seek,
-                        ),
-
-                        // 5. Central Playback Controls
-                        StreamBuilder<PlaybackState>(
-                          stream: audioHandler.playbackState,
-                          builder: (context, stateSnapshot) {
-                            final state = stateSnapshot.data;
-                            final playing = state?.playing ?? false;
-
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 16.0,
-                              ),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  // Every control sits in a 68-tall box (matching the play/pause
-                                  // circle) so the Row centers all five on the exact same line —
-                                  // IconButton's own minimum tap target height varies with iconSize
-                                  // (26 vs 36), which otherwise throws off the optical center.
-                                  SizedBox(
-                                    height: 68,
-                                    child: Center(
-                                      child: IconButton(
-                                        icon: const Icon(
-                                          Icons.replay_5,
-                                          color: Colors.white70,
-                                          size: 26,
-                                        ),
-                                        tooltip: l10n.nowPlayingRewind5,
-                                        onPressed: () =>
-                                            audioHandler.seekRelative(
-                                              const Duration(seconds: -5),
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    height: 68,
-                                    child: Center(
-                                      child: IconButton(
-                                        icon: const Icon(
-                                          Icons.skip_previous,
-                                          color: Colors.white,
-                                          size: 36,
-                                        ),
-                                        onPressed: () =>
-                                            audioHandler.skipToPrevious(),
-                                      ),
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 68,
-                                    height: 68,
-                                    decoration: const BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.white,
-                                    ),
-                                    child: IconButton(
-                                      icon: Icon(
-                                        playing
-                                            ? Icons.pause
-                                            : Icons.play_arrow,
-                                        color: Colors.black,
-                                        size: 36,
-                                      ),
-                                      onPressed: () {
-                                        if (playing) {
-                                          audioHandler.pause();
-                                        } else {
-                                          audioHandler.play();
-                                        }
-                                      },
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    height: 68,
-                                    child: Center(
-                                      child: IconButton(
-                                        icon: const Icon(
-                                          Icons.skip_next,
-                                          color: Colors.white,
-                                          size: 36,
-                                        ),
-                                        onPressed: () =>
-                                            audioHandler.skipToNext(),
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(
-                                    height: 68,
-                                    child: Center(
-                                      child: IconButton(
-                                        icon: const Icon(
-                                          Icons.forward_5,
-                                          color: Colors.white70,
-                                          size: 26,
-                                        ),
-                                        tooltip: l10n.nowPlayingForward5,
-                                        onPressed: () =>
-                                            audioHandler.seekRelative(
-                                              const Duration(seconds: 5),
-                                            ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
                         const SizedBox(height: 10),
                       ],
                     );
@@ -550,6 +296,342 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _buildBlock(
+    BuildContext context,
+    NowPlayingBlock block, {
+    required AudioPlayerHandler audioHandler,
+    required MediaItem mediaItem,
+    required SettingsProvider settings,
+    required PlaybackControlColors controls,
+    required AppLocalizations l10n,
+    required double artSize,
+  }) {
+    return switch (block) {
+      NowPlayingBlock.art => _buildArtBlock(mediaItem, artSize),
+      NowPlayingBlock.info => _buildInfoBlock(
+        mediaItem,
+        settings,
+        l10n,
+        settings.nowPlayingTitleAlign,
+      ),
+      NowPlayingBlock.actions => _buildActionsBlock(
+        context,
+        audioHandler,
+        mediaItem,
+        l10n,
+      ),
+      NowPlayingBlock.seekBar => _buildSeekBlock(
+        audioHandler,
+        mediaItem,
+        controls,
+      ),
+      NowPlayingBlock.controls => _buildControlsBlock(
+        audioHandler,
+        controls,
+        l10n,
+        showSeekButtons: settings.showSeekButtons,
+      ),
+    };
+  }
+
+  Widget _buildArtBlock(MediaItem mediaItem, double artSize) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32.0),
+      child: Card(
+        elevation: 16,
+        shadowColor: _dominantColor.withValues(alpha: 0.3),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: _buildAlbumArt(mediaItem, artSize),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoBlock(
+    MediaItem mediaItem,
+    SettingsProvider settings,
+    AppLocalizations l10n,
+    NowPlayingTitleAlign titleAlign,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+      child: Column(
+        crossAxisAlignment: titleAlign.crossAxis,
+        children: [
+          MarqueeTitle(
+            mediaItem.title,
+            textAlign: titleAlign.textAlign,
+            style: TextStyle(
+              color: resolveAreaColor(
+                settings.areaColor(ColorArea.nowPlayingTitle),
+                Colors.white,
+              ),
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 6),
+          ArtistLink(
+            label: mediaItem.artist ?? l10n.commonUnknownArtist,
+            busy: _openingArtist,
+            onTap: (mediaItem.artist ?? '').trim().isEmpty
+                ? null
+                : () => _openArtist(mediaItem.artist!),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionsBlock(
+    BuildContext context,
+    AudioPlayerHandler audioHandler,
+    MediaItem mediaItem,
+    AppLocalizations l10n,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          ElevatedButton.icon(
+            icon: const Icon(
+              Icons.lyrics_outlined,
+              size: 18,
+              color: Colors.white,
+            ),
+            label: Text(
+              l10n.nowPlayingLyricsButton,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white.withValues(
+                alpha: 0.08,
+              ),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 10,
+              ),
+            ),
+            onPressed: () => _showLyricsBottomSheet(
+              context,
+              audioHandler,
+              mediaItem,
+              _dominantColor,
+            ),
+          ),
+          const SizedBox(width: 16),
+          ElevatedButton.icon(
+            icon: const Icon(
+              Icons.queue_music,
+              size: 18,
+              color: Colors.white,
+            ),
+            label: Text(
+              l10n.nowPlayingQueueButton,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white.withValues(
+                alpha: 0.08,
+              ),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 20,
+                vertical: 10,
+              ),
+            ),
+            onPressed: () => _showQueueBottomSheet(
+              context,
+              audioHandler,
+            ),
+          ),
+          if (showsPhoneAddButton(mediaItem)) ...[
+            const SizedBox(width: 16),
+            ElevatedButton.icon(
+              key: const Key('now_playing_add_button'),
+              icon: const Icon(
+                Icons.playlist_add,
+                size: 18,
+                color: Colors.white,
+              ),
+              label: Text(
+                l10n.nowPlayingAddButton,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white.withValues(
+                  alpha: 0.08,
+                ),
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
+              ),
+              onPressed: () => _addCurrent(mediaItem),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSeekBlock(
+    AudioPlayerHandler audioHandler,
+    MediaItem mediaItem,
+    PlaybackControlColors controls,
+  ) {
+    return WaveformSeekSection(
+      activeColor: controls.accent,
+      mediaItem: mediaItem,
+      positionStream: audioHandler.player.positionStream,
+      onSeek: audioHandler.seek,
+    );
+  }
+
+  Widget _buildControlsBlock(
+    AudioPlayerHandler audioHandler,
+    PlaybackControlColors controls,
+    AppLocalizations l10n, {
+    required bool showSeekButtons,
+  }) {
+    return StreamBuilder<PlaybackState>(
+      stream: audioHandler.playbackState,
+      builder: (context, stateSnapshot) {
+        final state = stateSnapshot.data;
+        final playing = state?.playing ?? false;
+
+        return Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16.0,
+          ),
+          child: Row(
+            mainAxisAlignment:
+                MainAxisAlignment.spaceEvenly,
+            children: [
+              // Every control sits in a 68-tall box (matching the play/pause
+              // circle) so the Row centers all five on the exact same line —
+              // IconButton's own minimum tap target height varies with iconSize
+              // (26 vs 36), which otherwise throws off the optical center.
+              if (showSeekButtons)
+                SizedBox(
+                  height: 68,
+                  child: Center(
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.replay_5,
+                        color: controls.secondaryIcon,
+                        size: 26,
+                      ),
+                      tooltip: l10n.nowPlayingRewind5,
+                      onPressed: () =>
+                          audioHandler.seekRelative(
+                            const Duration(seconds: -5),
+                          ),
+                    ),
+                  ),
+                ),
+              SizedBox(
+                height: 68,
+                child: Center(
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.skip_previous,
+                      color: controls.icon,
+                      size: 36,
+                    ),
+                    onPressed: () =>
+                        audioHandler.skipToPrevious(),
+                  ),
+                ),
+              ),
+              Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: controls.playButton,
+                ),
+                child: IconButton(
+                  icon: Icon(
+                    playing
+                        ? Icons.pause
+                        : Icons.play_arrow,
+                    color: controls.playIcon,
+                    size: 36,
+                  ),
+                  onPressed: () {
+                    if (playing) {
+                      audioHandler.pause();
+                    } else {
+                      audioHandler.play();
+                    }
+                  },
+                ),
+              ),
+              SizedBox(
+                height: 68,
+                child: Center(
+                  child: IconButton(
+                    icon: Icon(
+                      Icons.skip_next,
+                      color: controls.icon,
+                      size: 36,
+                    ),
+                    onPressed: () =>
+                        audioHandler.skipToNext(),
+                  ),
+                ),
+              ),
+              if (showSeekButtons)
+                SizedBox(
+                  height: 68,
+                  child: Center(
+                    child: IconButton(
+                      icon: Icon(
+                        Icons.forward_5,
+                        color: controls.secondaryIcon,
+                        size: 26,
+                      ),
+                      tooltip: l10n.nowPlayingForward5,
+                      onPressed: () =>
+                          audioHandler.seekRelative(
+                            const Duration(seconds: 5),
+                          ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -604,7 +686,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         leading: Icon(
                           Icons.shuffle,
                           color: isShuffle
-                              ? const Color(0xFF8C9EFF)
+                              ? AppTheme.playerAccent
                               : Colors.white54,
                         ),
                         title: Text(
@@ -617,7 +699,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               : l10n.nowPlayingOffLabel,
                           style: TextStyle(
                             color: isShuffle
-                                ? const Color(0xFF8C9EFF)
+                                ? AppTheme.playerAccent
                                 : Colors.white38,
                           ),
                         ),
@@ -635,7 +717,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                               ? Icons.repeat_one
                               : Icons.repeat,
                           color: isRepeatActive
-                              ? const Color(0xFF8C9EFF)
+                              ? AppTheme.playerAccent
                               : Colors.white54,
                         ),
                         title: Text(
@@ -646,7 +728,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                           _repeatModeLabel(context, repeatMode),
                           style: TextStyle(
                             color: isRepeatActive
-                                ? const Color(0xFF8C9EFF)
+                                ? AppTheme.playerAccent
                                 : Colors.white38,
                           ),
                         ),
@@ -679,7 +761,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         : l10n.repeatCountBody,
                     style: TextStyle(
                       color: remaining > 0
-                          ? const Color(0xFF8C9EFF)
+                          ? AppTheme.playerAccent
                           : Colors.white38,
                     ),
                   ),
@@ -722,7 +804,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                         : l10n.nowPlayingOffLabel,
                     style: TextStyle(
                       color: fx.equalizerEnabled
-                          ? const Color(0xFF8C9EFF)
+                          ? AppTheme.playerAccent
                           : Colors.white38,
                     ),
                   ),
@@ -740,9 +822,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 builder: (context, tracksLeft, _) {
                   if (tracksLeft == null) return const SizedBox.shrink();
                   return ListTile(
-                    leading: const Icon(
+                    leading: Icon(
                       Icons.bedtime,
-                      color: Color(0xFF8C9EFF),
+                      color: AppTheme.playerAccent,
                     ),
                     title: Text(
                       l10n.nowPlayingSleepTimerTitle,
@@ -769,9 +851,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                   }
                   if (remaining != null) {
                     return ListTile(
-                      leading: const Icon(
+                      leading: Icon(
                         Icons.bedtime,
-                        color: Color(0xFF8C9EFF),
+                        color: AppTheme.playerAccent,
                       ),
                       title: Text(
                         l10n.nowPlayingSleepTimerTitle,
@@ -918,18 +1000,16 @@ void showSleepTimerPicker(
                   // Peer chip, not a buried link below the presets — same visual
                   // weight so a custom duration is just as discoverable.
                   ActionChip(
-                    avatar: const Icon(
+                    avatar: Icon(
                       Icons.edit_outlined,
                       size: 16,
-                      color: Color(0xFF8C9EFF),
+                      color: AppTheme.playerAccent,
                     ),
                     label: Text(
                       l10n.nowPlayingCustomChip,
-                      style: const TextStyle(color: Color(0xFF8C9EFF)),
+                      style: TextStyle(color: AppTheme.playerAccent),
                     ),
-                    backgroundColor: const Color(
-                      0xFF8C9EFF,
-                    ).withValues(alpha: 0.12),
+                    backgroundColor: AppTheme.playerAccent.withValues(alpha: 0.12),
                     onPressed: () async {
                       Navigator.of(sheetContext).pop();
                       final customMinutes = await _promptCustomMinutes(context);
@@ -1087,6 +1167,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
   bool _isLoading = true;
   String? _lyricsText;
   List<LyricLine> _parsedLines = [];
+  AppTextScale _lyricsScale = AppTextScale.normal;
   int _activeIndex = -1;
   bool _showTranslation = false;
   bool _isTranslating = false;
@@ -1163,7 +1244,12 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
     super.dispose();
   }
 
-  Widget _buildLineText(int index, LyricLine line, bool isActive) {
+  Widget _buildLineText(
+    int index,
+    LyricLine line,
+    bool isActive,
+    LyricsColors colors,
+  ) {
     if (!isActive || line.words.isEmpty) {
       return Text(line.text, textAlign: TextAlign.left);
     }
@@ -1184,10 +1270,10 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                   text: line.words[i].text,
                   style: TextStyle(
                     color: i < p.index
-                        ? Colors.white
+                        ? colors.active
                         : i == p.index
-                        ? Color.lerp(Colors.white38, Colors.white, p.progress)
-                        : Colors.white38,
+                        ? Color.lerp(colors.inactive, colors.active, p.progress)
+                        : colors.inactive,
                   ),
                 ),
             ],
@@ -1401,7 +1487,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                           icon: Icon(
                             Icons.translate_rounded,
                             color: _showTranslation
-                                ? const Color(0xFF8C9EFF)
+                                ? AppTheme.playerAccent
                                 : Colors.white70,
                           ),
                           onPressed: _lyricsText == null
@@ -1429,14 +1515,35 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
   /// grande en pantalla (ver `LyricsBottomSheet.cinemaMode`) — bastante más
   /// que el tamaño normal, pero sin ser tan grande que una línea larga
   /// desborde el ancho de la columna izquierda del panel.
-  double get _activeLineFontSize => widget.cinemaMode ? 42 : 21;
-  double get _inactiveLineFontSize => widget.cinemaMode ? 32 : 18;
+  double get _activeLineFontSize => lyricsLineFontSize(
+    widget.cinemaMode ? 42 : 21,
+    _lyricsScale,
+    cinemaMode: widget.cinemaMode,
+  );
+  double get _inactiveLineFontSize => lyricsLineFontSize(
+    widget.cinemaMode ? 32 : 18,
+    _lyricsScale,
+    cinemaMode: widget.cinemaMode,
+  );
 
   Widget _buildLyricsBody(BuildContext context) {
     final isSynced = _parsedLines.isNotEmpty;
+    _lyricsScale = context.select<SettingsProvider, AppTextScale>(
+      (s) => s.lyricsTextScale,
+    );
+    // `AnimatedDefaultTextStyle` reemplaza el estilo heredado del tema, y con
+    // él la fuente elegida.
+    final fontFamily = context.select<SettingsProvider, String?>(
+      (s) => s.appFont.family,
+    );
+    final colors = resolveLyricsColors(
+      context.select<SettingsProvider, Color?>(
+        (s) => s.areaColor(ColorArea.lyrics),
+      ),
+    );
     return _isLoading
-        ? const Center(
-            child: CircularProgressIndicator(color: Color(0xFF8C9EFF)),
+        ? Center(
+            child: CircularProgressIndicator(color: AppTheme.playerAccent),
           )
         : _lyricsText == null
         ? Center(
@@ -1478,7 +1585,8 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                         child: AnimatedDefaultTextStyle(
                           duration: const Duration(milliseconds: 200),
                           style: TextStyle(
-                            color: isActive ? Colors.white : Colors.white38,
+                            fontFamily: fontFamily,
+                            color: isActive ? colors.active : colors.inactive,
                             fontSize: isActive
                                 ? _activeLineFontSize
                                 : _inactiveLineFontSize,
@@ -1492,7 +1600,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _buildLineText(index, line, isActive),
+                                _buildLineText(index, line, isActive, colors),
                                 if (_showTranslation &&
                                     _translatedLines != null &&
                                     index < _translatedLines!.length &&
@@ -1503,9 +1611,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                                       _translatedLines![index],
                                       textAlign: TextAlign.left,
                                       style: TextStyle(
-                                        color: Colors.white.withValues(
-                                          alpha: 0.4,
-                                        ),
+                                        color: colors.translation,
                                         fontSize:
                                             (isActive
                                                 ? _activeLineFontSize
@@ -1546,7 +1652,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                                       Text(
                                         original,
                                         style: TextStyle(
-                                          color: Colors.white70,
+                                          color: colors.plain,
                                           fontSize: _inactiveLineFontSize,
                                           height: 1.6,
                                         ),
@@ -1559,9 +1665,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                                           child: Text(
                                             translation,
                                             style: TextStyle(
-                                              color: Colors.white.withValues(
-                                                alpha: 0.4,
-                                              ),
+                                              color: colors.translation,
                                               fontSize:
                                                   _inactiveLineFontSize -
                                                   (widget.cinemaMode ? 8 : 4),
@@ -1578,7 +1682,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                         : Text(
                             _lyricsText!,
                             style: TextStyle(
-                              color: Colors.white70,
+                              color: colors.plain,
                               fontSize: _inactiveLineFontSize,
                               height: 1.6,
                             ),
@@ -1621,7 +1725,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                   icon: Icon(
                     Icons.translate_rounded,
                     color: _showTranslation
-                        ? const Color(0xFF8C9EFF)
+                        ? AppTheme.playerAccent
                         : Colors.white70,
                   ),
                   onPressed: _lyricsText == null ? null : _toggleTranslation,
@@ -1638,7 +1742,7 @@ class _LyricsBottomSheetState extends State<LyricsBottomSheet> {
                         ? Icons.theaters_rounded
                         : Icons.theaters_outlined,
                     color: widget.cinemaMode
-                        ? const Color(0xFF8C9EFF)
+                        ? AppTheme.playerAccent
                         : Colors.white70,
                   ),
                   onPressed: () => widget.onToggleCinemaMode!(),
@@ -1853,7 +1957,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: isPlaying
-                              ? const Color(0xFF8C9EFF)
+                              ? AppTheme.playerAccent
                               : Colors.white,
                           fontWeight: isPlaying
                               ? FontWeight.bold
@@ -1867,7 +1971,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: isPlaying
-                              ? const Color(0xFF8C9EFF).withValues(alpha: 0.7)
+                              ? AppTheme.playerAccent.withValues(alpha: 0.7)
                               : Colors.white38,
                           fontSize: 13,
                         ),
@@ -1918,6 +2022,9 @@ class WaveformSeekSection extends StatefulWidget {
   /// Escritorio: onda más baja y con menos barras.
   final bool compact;
 
+  /// `null` usa el acento de reproducción del tema.
+  final Color? activeColor;
+
   /// Inyectable en tests; por defecto el repositorio de la plataforma.
   final Future<Uint8List?> Function(String songId, String path)? loadPeaks;
 
@@ -1928,6 +2035,7 @@ class WaveformSeekSection extends StatefulWidget {
     required this.onSeek,
     this.inline = false,
     this.compact = false,
+    this.activeColor,
     this.loadPeaks,
   });
 
@@ -1981,6 +2089,7 @@ class _WaveformSeekSectionState extends State<WaveformSeekSection> {
           position: posSnapshot.data ?? Duration.zero,
           duration: widget.mediaItem.duration ?? Duration.zero,
           peaks: _peaks,
+          activeColor: widget.activeColor,
           onChangeEnd: widget.onSeek,
         );
       },
@@ -2010,6 +2119,9 @@ class SeekBar extends StatefulWidget {
   /// Onda baja y de barras más anchas (escritorio).
   final bool compact;
 
+  /// `null` usa el acento de reproducción del tema.
+  final Color? activeColor;
+
   const SeekBar({
     super.key,
     required this.position,
@@ -2018,6 +2130,7 @@ class SeekBar extends StatefulWidget {
     this.inline = false,
     this.peaks,
     this.compact = false,
+    this.activeColor,
   });
 
   @override
@@ -2026,6 +2139,8 @@ class SeekBar extends StatefulWidget {
 
 class _SeekBarState extends State<SeekBar> {
   double? _dragValue;
+
+  Color get _activeColor => widget.activeColor ?? AppTheme.playerAccent;
 
   String _formatDuration(Duration d) {
     final minutes = d.inMinutes;
@@ -2054,7 +2169,7 @@ class _SeekBarState extends State<SeekBar> {
             onScrub: (d) => setState(
               () => _dragValue = d?.inMilliseconds.toDouble(),
             ),
-            activeColor: const Color(0xFF8C9EFF),
+            activeColor: _activeColor,
             inactiveColor: Colors.white24,
             semanticsLabel: l10n.nowPlayingSeekLabel,
             semanticsValue: l10n.nowPlayingSeekValue(
@@ -2072,10 +2187,12 @@ class _SeekBarState extends State<SeekBar> {
         : Duration(milliseconds: _dragValue!.toInt());
 
     if (widget.inline) {
+      // Ancho de los tiempos a escala, o se partirían en dos líneas.
+      final timeWidth = MediaQuery.textScalerOf(context).scale(40);
       return Row(
         children: [
           SizedBox(
-            width: 40,
+            width: timeWidth,
             child: Text(
               _formatDuration(shownPosition),
               textAlign: TextAlign.right,
@@ -2084,7 +2201,7 @@ class _SeekBarState extends State<SeekBar> {
           ),
           Expanded(child: slider),
           SizedBox(
-            width: 40,
+            width: timeWidth,
             child: Text(_formatDuration(widget.duration), style: timeStyle),
           ),
         ],
@@ -2119,9 +2236,9 @@ class _SeekBarState extends State<SeekBar> {
         trackHeight: 4,
         thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
         overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
-        activeTrackColor: const Color(0xFF8C9EFF),
+        activeTrackColor: _activeColor,
         inactiveTrackColor: Colors.white10,
-        thumbColor: const Color(0xFF8C9EFF),
+        thumbColor: _activeColor,
       ),
       child: Slider(
         min: 0,

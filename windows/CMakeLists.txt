@@ -111,6 +111,71 @@ list(FILTER PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "/libmpv-2\\.dll$")
 list(APPEND PLUGIN_BUNDLED_LIBRARIES "${LIBMPV_EQ_DLL}")
 
 
+# sherpa-onnx (separación de stems del Mix DJ, Apache-2.0) y su ONNX Runtime
+# (MIT), del release oficial v2.0.1 de k2-fsa/sherpa-onnx, fijados por SHA-256
+# como libmpv: el .tar.bz2 se verifica antes de abrirlo, se extraen solo las tres
+# DLL en su propio directorio y cada una se vuelve a verificar; si algo no
+# coincide el build falla. Se instalan junto a heardy.exe, y la app además abre
+# nuestro onnxruntime.dll por ruta completa antes de sherpa-onnx, porque Windows
+# 11 trae un onnxruntime.dll 1.17.1 en System32 que no sirve (API 28).
+set(SHERPA_ONNX_VERSION "2.0.1")
+set(SHERPA_ONNX_DIRNAME "sherpa-onnx-v${SHERPA_ONNX_VERSION}-win-x64-shared-MD-Release-no-tts")
+set(SHERPA_ONNX_SHA256 "11fd6a50b97eed38b54fb16d8219f49b16aa7f6a8e43a042316469ef47652e82")
+set(SHERPA_ONNX_DLLS sherpa-onnx-c-api.dll onnxruntime.dll onnxruntime_providers_shared.dll)
+set(SHERPA_ONNX_DLL_SHA256
+  "71728fb12b3a15a9ab7c4961fceafc6dd802f7fc038f461f5ea59e07d7104bec"
+  "422d776ab0e3218260f7f628fcb84606aaa5c21116f720c8619a6da5e0b2e0f9"
+  "0190137dee4933261c065c5d030c3568a68c7aa43cad942b4726a07011738bc2")
+set(SHERPA_ONNX_ARCHIVE "${CMAKE_BINARY_DIR}/sherpa-onnx-dl/${SHERPA_ONNX_DIRNAME}.tar.bz2")
+set(SHERPA_ONNX_DIR "${CMAKE_BINARY_DIR}/sherpa-onnx-${SHERPA_ONNX_VERSION}")
+function(sherpa_onnx_dlls_ok OUT)
+  set(ok TRUE)
+  foreach(dll hash IN ZIP_LISTS SHERPA_ONNX_DLLS SHERPA_ONNX_DLL_SHA256)
+    set(f "${SHERPA_ONNX_DIR}/${SHERPA_ONNX_DIRNAME}/lib/${dll}")
+    if(NOT EXISTS "${f}")
+      set(ok FALSE)
+    else()
+      file(SHA256 "${f}" have)
+      if(NOT have STREQUAL hash)
+        set(ok FALSE)
+      endif()
+    endif()
+  endforeach()
+  set(${OUT} ${ok} PARENT_SCOPE)
+endfunction()
+sherpa_onnx_dlls_ok(SHERPA_ONNX_OK)
+if(NOT SHERPA_ONNX_OK)
+  file(REMOVE_RECURSE "${SHERPA_ONNX_DIR}")
+  file(DOWNLOAD
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_ONNX_VERSION}/${SHERPA_ONNX_DIRNAME}.tar.bz2"
+    "${SHERPA_ONNX_ARCHIVE}"
+    EXPECTED_HASH SHA256=${SHERPA_ONNX_SHA256}
+    STATUS SHERPA_ONNX_DL_STATUS)
+  list(GET SHERPA_ONNX_DL_STATUS 0 SHERPA_ONNX_DL_CODE)
+  if(NOT SHERPA_ONNX_DL_CODE EQUAL 0)
+    file(REMOVE "${SHERPA_ONNX_ARCHIVE}")
+    message(FATAL_ERROR "No se pudo descargar ${SHERPA_ONNX_DIRNAME}.tar.bz2: ${SHERPA_ONNX_DL_STATUS}")
+  endif()
+  file(MAKE_DIRECTORY "${SHERPA_ONNX_DIR}")
+  set(SHERPA_ONNX_MEMBERS "")
+  foreach(dll ${SHERPA_ONNX_DLLS})
+    list(APPEND SHERPA_ONNX_MEMBERS "${SHERPA_ONNX_DIRNAME}/lib/${dll}")
+  endforeach()
+  execute_process(
+    COMMAND ${CMAKE_COMMAND} -E tar xf "${SHERPA_ONNX_ARCHIVE}" -- ${SHERPA_ONNX_MEMBERS}
+    WORKING_DIRECTORY "${SHERPA_ONNX_DIR}"
+    RESULT_VARIABLE SHERPA_ONNX_EXTRACT_RESULT)
+  sherpa_onnx_dlls_ok(SHERPA_ONNX_OK)
+  if(NOT SHERPA_ONNX_EXTRACT_RESULT EQUAL 0 OR NOT SHERPA_ONNX_OK)
+    file(REMOVE_RECURSE "${SHERPA_ONNX_DIR}")
+    message(FATAL_ERROR "Las DLL de ${SHERPA_ONNX_DIRNAME} no coinciden con los hashes fijados")
+  endif()
+endif()
+foreach(dll ${SHERPA_ONNX_DLLS})
+  list(APPEND PLUGIN_BUNDLED_LIBRARIES "${SHERPA_ONNX_DIR}/${SHERPA_ONNX_DIRNAME}/lib/${dll}")
+endforeach()
+
+
 # === Installation ===
 # Support files are copied into place next to the executable, so that it can
 # run in place. This is done instead of making a separate bundle (as on Linux)

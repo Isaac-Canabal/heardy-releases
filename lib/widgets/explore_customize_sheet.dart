@@ -5,6 +5,7 @@ import '../l10n/app_localizations.dart';
 import '../providers/settings_provider.dart';
 import '../services/explore_logic.dart';
 import '../theme/app_theme.dart';
+import 'reorder_sheet.dart';
 
 String exploreShelfLabel(AppLocalizations l10n, ExploreShelfId id) => switch (id) {
       ExploreShelfId.recent => l10n.exploreRecentTitle,
@@ -14,6 +15,8 @@ String exploreShelfLabel(AppLocalizations l10n, ExploreShelfId id) => switch (id
       ExploreShelfId.newReleases => l10n.exploreNewReleasesTitle,
       ExploreShelfId.home => l10n.exploreSectionHome,
       ExploreShelfId.moods => l10n.exploreSectionMoods,
+      ExploreShelfId.followed => l10n.exploreFollowedTitle,
+      ExploreShelfId.followedReleases => l10n.exploreFollowedReleasesTitle,
     };
 
 bool _isEnglish(BuildContext context) => Localizations.localeOf(context).languageCode == 'en';
@@ -47,6 +50,22 @@ Future<void> showExploreCountryPicker(BuildContext context, {VoidCallback? onCha
         onChanged?.call();
       },
     ),
+  );
+}
+
+/// El orden es sólo visual: no pasa por `onChanged` porque no hay nada que
+/// volver a pedir. Las ocultas se ofrecen igual, para que conserven su sitio.
+Future<void> _showShelfOrderSheet(BuildContext context) {
+  final l10n = AppLocalizations.of(context)!;
+  final settings = context.read<SettingsProvider>();
+  return showReorderSheet(
+    context,
+    title: l10n.exploreShelfOrder,
+    items: [
+      for (final id in settings.exploreShelfOrder) ReorderItem(id: id.name, label: exploreShelfLabel(l10n, id)),
+    ],
+    defaultOrder: [for (final id in kDefaultExploreShelfOrder) id.name],
+    onChanged: (names) => settings.setExploreShelfOrder(names.map(ExploreShelfId.values.byName).toList()),
   );
 }
 
@@ -87,6 +106,13 @@ class ExploreCustomizeSheet extends StatelessWidget {
               onChanged?.call();
             },
           ),
+        ListTile(
+          key: const Key('explore_shelf_order_tile'),
+          leading: Icon(Icons.swap_vert_rounded, color: AppTheme.primaryLight),
+          title: Text(l10n.exploreShelfOrder),
+          trailing: const Icon(Icons.chevron_right_rounded),
+          onTap: () => _showShelfOrderSheet(context),
+        ),
         _label(l10n.exploreCustomizeCountry),
         ListTile(
           key: const Key('explore_country_tile'),

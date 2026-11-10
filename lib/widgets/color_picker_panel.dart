@@ -33,6 +33,9 @@ class ColorPickerPanel extends StatefulWidget {
   State<ColorPickerPanel> createState() => _ColorPickerPanelState();
 }
 
+// Los toques eligen al soltar y los arrastres al empezar a ganar el gesto: con
+// `onPanDown` el color cambiaba (y la app repintaba el tema) cada vez que un
+// dedo que solo desplazaba la lista pasaba por encima del selector.
 class _ColorPickerPanelState extends State<ColorPickerPanel> {
   late HSVColor _hsv = colorToHsv(widget.color);
 
@@ -78,7 +81,8 @@ class _ColorPickerPanelState extends State<ColorPickerPanel> {
                 return GestureDetector(
                   key: const ValueKey('picker-sv'),
                   behavior: HitTestBehavior.opaque,
-                  onPanDown: (d) => _onSv(d.localPosition, size),
+                  onTapUp: (d) => _onSv(d.localPosition, size),
+                  onPanStart: (d) => _onSv(d.localPosition, size),
                   onPanUpdate: (d) => _onSv(d.localPosition, size),
                   child: Stack(
                     clipBehavior: Clip.none,
@@ -131,7 +135,8 @@ class _ColorPickerPanelState extends State<ColorPickerPanel> {
                 return GestureDetector(
                   key: const ValueKey('picker-hue'),
                   behavior: HitTestBehavior.opaque,
-                  onPanDown: (d) => _onHue(d.localPosition, size),
+                  onTapUp: (d) => _onHue(d.localPosition, size),
+                  onPanStart: (d) => _onHue(d.localPosition, size),
                   onPanUpdate: (d) => _onHue(d.localPosition, size),
                   child: Stack(
                     clipBehavior: Clip.none,

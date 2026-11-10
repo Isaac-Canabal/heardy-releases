@@ -10,6 +10,7 @@ import '../services/cloud_source.dart';
 import '../l10n/app_localizations.dart';
 import '../services/friendly_error.dart';
 import '../services/database_helper.dart';
+import '../services/followed_artists_merge.dart';
 import '../services/library_diff.dart';
 import '../models/playlist.dart';
 import '../models/remote_track_record.dart';
@@ -77,6 +78,12 @@ class SyncProvider with ChangeNotifier {
   /// pistas que venían de la nube: quien muestre playlists lo observa para
   /// recargarlas.
   int get onlinePlaylistsRevision => _onlinePlaylistsRevision;
+
+  int _followedArtistsRevision = 0;
+
+  /// Sube cada vez que una sincronización cambió los artistas seguidos de este
+  /// dispositivo con filas de la nube.
+  int get followedArtistsRevision => _followedArtistsRevision;
 
   static const _prefsKeyLastPushedHash = 'sync_last_pushed_library_hash';
   static const _prefsKeyLastSeenCloudVersion = 'sync_last_seen_cloud_version';
@@ -526,7 +533,7 @@ class SyncProvider with ChangeNotifier {
       _lastSeenCloudVersion ??= prefs.getInt(_prefsKeyLastSeenCloudVersion);
     }
 
-    final local = await _db.getLibraryIndexRows(includeOnline: true);
+    final local = await _localIndex();
     final localHash = _hashOf(local);
     final needsPush = localHash != _lastPushedContentHash;
     // La versión que informa `GET /account` ya dice si otro dispositivo
@@ -537,20 +544,39 @@ class SyncProvider with ChangeNotifier {
     final cloud = await _source.getLibrary();
     final merged = cloud == null
         ? local
-        : unionCloudIntoLocalIndex(
-            local: local,
-            cloudSongs: cloud.songs,
-            cloudPlaylists: cloud.playlists,
-            cloudPlaylistSongs: cloud.playlistSongs,
-            cloudOnlinePlaylists: cloud.onlinePlaylists,
-            cloudRemoteTracks: cloud.remoteTracks,
-            cloudPlaylistRemoteTracks: cloud.playlistRemoteTracks,
-          );
+        : {
+            ...unionCloudIntoLocalIndex(
+              local: local,
+              cloudSongs: cloud.songs,
+              cloudPlaylists: cloud.playlists,
+              cloudPlaylistSongs: cloud.playlistSongs,
+              cloudOnlinePlaylists: cloud.onlinePlaylists,
+              cloudRemoteTracks: cloud.remoteTracks,
+              cloudPlaylistRemoteTracks: cloud.playlistRemoteTracks,
+            ),
+            'followedArtists': mergeFollowedArtists(local['followedArtists']!, cloud.followedArtists),
+          };
+
+    // Un archivo que llegó por la herramienta de carpeta del usuario y que la
+    // nube ya conoce como mix adopta la marca (nunca se quita).
+    final markedMix = cloud == null ? const <String>[] : songIdsToMarkAsMix(local['songs']!, cloud.songs);
+    await _db.markSongsAsMix(markedMix);
 
     // Aditivo y sólo local: lo que la nube trae y acá falta se crea; nada se
     // quita. Va antes de subir para que lo subido ya incluya el resultado.
     final materialized = cloud == null ? false : await _materializeOnlinePlaylists(local, merged);
+    final followsWritten = cloud == null ? 0 : await _db.mergeFollowedArtistRows(cloud.followedArtists);
+    if (followsWritten > 0) {
+      _followedArtistsRevision++;
+      notifyListeners();
+    }
+    // Lo que acaba de crearse viene de la nube: no hay nada que devolverle, así
+    // que el índice local nuevo es el que cuenta como ya subido. Se lee antes de
+    // subir para que lo que cambie durante la subida siga pendiente.
+    final pulled = materialized || followsWritten > 0 || markedMix.isNotEmpty;
+    final afterPull = pulled ? await _localIndex() : local;
 
+    var followsSkipped = false;
     var version = cloud?.version ?? _libraryVersion;
     if (needsPush) {
       version = await _source.pushLibrary(
@@ -561,16 +587,18 @@ class SyncProvider with ChangeNotifier {
         playlistSongs: merged['playlistSongs']!,
         remoteTracks: merged['remoteTracks'] ?? const [],
         playlistRemoteTracks: merged['playlistRemoteTracks'] ?? const [],
+        followedArtists: followedArtistsForCloud(merged['followedArtists']!),
+        onFollowedArtistsSkipped: () => followsSkipped = true,
       );
       _libraryVersion = version;
     }
     _lastSeenCloudVersion = version;
 
-    // Lo que acaba de crearse viene de la nube: no hay nada que devolverle,
-    // así que el índice local nuevo es el que cuenta como ya subido.
-    if (needsPush || materialized) {
+    // Sin los seguidos en el hash, la pasada siguiente los ve pendientes y los
+    // vuelve a intentar cuando el servidor ya los acepte.
+    if (needsPush || pulled) {
       _lastPushedContentHash =
-          materialized ? _hashOf(await _db.getLibraryIndexRows(includeOnline: true)) : localHash;
+          _hashOf(followsSkipped ? {...afterPull, 'followedArtists': const []} : afterPull);
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_prefsKeyLastSeenCloudVersion, version);
@@ -578,6 +606,12 @@ class SyncProvider with ChangeNotifier {
       await prefs.setString(_prefsKeyLastPushedHash, _lastPushedContentHash!);
     }
   }
+
+  /// El índice que se sincroniza con la nube, con las bajas de los seguidos.
+  Future<Map<String, List<Map<String, dynamic>>>> _localIndex() async => {
+        ...await _db.getLibraryIndexRows(includeOnline: true),
+        'followedArtists': await _db.getFollowedArtistRowsForSync(),
+      };
 
   /// Crea las playlists online que existen en la nube y acá no, y añade al
   /// final las pistas que a las que sí existen les faltan. Devuelve si cambió
@@ -622,12 +656,16 @@ class SyncProvider with ChangeNotifier {
       ..sort((a, b) => '${a['videoId']}'.compareTo('${b['videoId']}'));
     final playlistRemoteTracks = [...?index['playlistRemoteTracks']]
       ..sort((a, b) => '${a['playlistId']}${a['videoId']}'.compareTo('${b['playlistId']}${b['videoId']}'));
+    // Misma regla: sin seguidos el hash es el de siempre. Ya normalizados, otra
+    // grafía de la misma fecha no cuenta como cambio.
+    final followedArtists = mergeFollowedArtists(index['followedArtists'] ?? const [], const []);
     final bytes = utf8.encode(jsonEncode({
       's': songs,
       'p': playlists,
       'ps': playlistSongs,
       if (remoteTracks.isNotEmpty) 'rt': remoteTracks,
       if (playlistRemoteTracks.isNotEmpty) 'prt': playlistRemoteTracks,
+      if (followedArtists.isNotEmpty) 'fa': followedArtists,
     }));
     return md5.convert(bytes).toString();
   }
@@ -671,6 +709,14 @@ class SyncProvider with ChangeNotifier {
     final songId = _currentSongId;
     final startedAt = _songStartedAt;
     if (songId == null || startedAt == null) return;
+    // El mix efímero (`mix:`) no es una canción de la biblioteca: no se publica.
+    // Uno guardado es una canción más.
+    if (songId.startsWith('mix:')) return;
+    _publishPresence(songId, startedAt);
+  }
+
+  void _publishPresence(String songId, DateTime startedAt) {
+    if (!_shareEnabled() || !_currentlyPlaying) return;
 
     final now = DateTime.now();
     if (songId == _lastPublishedSongId &&
@@ -747,6 +793,21 @@ VoidCallback bindOnlinePlaylistsRefresh(SyncProvider sync, Future<void> Function
   void listener() {
     if (sync.onlinePlaylistsRevision == seen) return;
     seen = sync.onlinePlaylistsRevision;
+    reload();
+  }
+
+  sync.addListener(listener);
+  return listener;
+}
+
+/// Recarga los artistas seguidos cuando una sincronización con la nube los
+/// cambió ([SyncProvider.followedArtistsRevision]). Mismo cableado que
+/// [bindOnlinePlaylistsRefresh].
+VoidCallback bindCloudFollowsRefresh(SyncProvider sync, Future<void> Function() reload) {
+  var seen = sync.followedArtistsRevision;
+  void listener() {
+    if (sync.followedArtistsRevision == seen) return;
+    seen = sync.followedArtistsRevision;
     reload();
   }
 

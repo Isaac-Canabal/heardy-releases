@@ -17,6 +17,7 @@ class FolderSyncReport {
   final int playlistsAdded;
   final int membershipsAdded;
   final int historyAdded;
+  final int followedArtistsChanged;
   final int otherDeviceSongs;
   final String contentHash;
   final Object? importError;
@@ -30,6 +31,7 @@ class FolderSyncReport {
     this.playlistsAdded = 0,
     this.membershipsAdded = 0,
     this.historyAdded = 0,
+    this.followedArtistsChanged = 0,
     this.otherDeviceSongs = 0,
     this.contentHash = '',
     this.importError,
@@ -44,7 +46,7 @@ class FolderSyncWriteException implements Exception {
   String toString() => 'FolderSyncWriteException: $message';
 }
 
-typedef _Applied = ({int playlists, int memberships, int history, int others});
+typedef _Applied = ({int playlists, int memberships, int history, int followed, int others});
 
 /// Sincronización serverless por carpeta: cada dispositivo escribe SOLO su
 /// archivo en `.heardy/devices/` y lee los de los demás; la unión es aditiva.
@@ -58,15 +60,20 @@ class FolderSyncService {
   final String deviceLabel;
   final DateTime Function() _clock;
 
+  /// Avisa al terminar una importación que cambió artistas seguidos.
+  final Future<void> Function()? _onFollowedArtistsChanged;
+
   FolderSyncService({
     required LibraryStorage storage,
     required this.deviceId,
     required this.deviceLabel,
     DatabaseHelper? db,
     DateTime Function()? clock,
+    Future<void> Function()? onFollowedArtistsChanged,
   })  : _storage = storage,
         _db = db ?? DatabaseHelper.instance,
-        _clock = clock ?? DateTime.now;
+        _clock = clock ?? DateTime.now,
+        _onFollowedArtistsChanged = onFollowedArtistsChanged;
 
   Future<LibraryEntry> _ensureDir(String rootUri, List<String> names) async {
     var uri = rootUri;
@@ -102,6 +109,7 @@ class FolderSyncService {
       remoteTracks: index['remoteTracks']!,
       playlistRemoteTracks: index['playlistRemoteTracks']!,
       remoteHistory: await _db.getRemotePlayRowsForSync(),
+      followedArtists: await _db.getFollowedArtistRowsForSync(),
     );
   }
 
@@ -130,6 +138,7 @@ class FolderSyncService {
       playlistsAdded: applied?.playlists ?? 0,
       membershipsAdded: applied?.memberships ?? 0,
       historyAdded: applied?.history ?? 0,
+      followedArtistsChanged: applied?.followed ?? 0,
       otherDeviceSongs: applied?.others ?? 0,
       contentHash: exported.contentHash,
       importError: importError,
@@ -245,36 +254,31 @@ class FolderSyncService {
     if (snapshot == null) {
       throw const FolderSyncFormatException(FolderSyncErrorKind.malformed, 'backup ilegible');
     }
-    final applied = await _apply([snapshot]);
-    return FolderSyncReport(
-      filesRead: 1,
-      playlistsAdded: applied.playlists,
-      membershipsAdded: applied.memberships,
-      historyAdded: applied.history,
-      otherDeviceSongs: applied.others,
-    );
+    return _reportOf(await _apply([snapshot]));
   }
 
   /// Fusiona el snapshot de otro dispositivo recibido por un canal ya
   /// autenticado (sincronización por Wi-Fi) con el mismo código que la carpeta.
-  Future<FolderSyncReport> applyRemoteSnapshot(FolderSyncSnapshot snapshot) async {
-    final applied = await _apply([snapshot]);
-    return FolderSyncReport(
-      filesRead: 1,
-      playlistsAdded: applied.playlists,
-      membershipsAdded: applied.memberships,
-      historyAdded: applied.history,
-      otherDeviceSongs: applied.others,
-    );
-  }
+  Future<FolderSyncReport> applyRemoteSnapshot(FolderSyncSnapshot snapshot) async =>
+      _reportOf(await _apply([snapshot]));
+
+  FolderSyncReport _reportOf(_Applied applied) => FolderSyncReport(
+        filesRead: 1,
+        playlistsAdded: applied.playlists,
+        membershipsAdded: applied.memberships,
+        historyAdded: applied.history,
+        followedArtistsChanged: applied.followed,
+        otherDeviceSongs: applied.others,
+      );
 
   Future<_Applied> _apply(List<FolderSyncSnapshot> snapshots) async {
-    if (snapshots.isEmpty) return (playlists: 0, memberships: 0, history: 0, others: 0);
+    if (snapshots.isEmpty) return (playlists: 0, memberships: 0, history: 0, followed: 0, others: 0);
     final plan = planFolderImport(
       local: await _db.getLibraryIndexRows(includeOnline: true),
       snapshots: snapshots,
       localSourceUrls: await _db.getAllLocalSourceUrls(),
     );
+    await _db.markSongsAsMix(plan.songIdsToMarkAsMix);
     final now = _clock();
     for (final row in plan.newPlaylists) {
       await _db.insertPlaylist(Playlist(
@@ -319,11 +323,24 @@ class FolderSyncService {
     if (plan.remoteHistory.isNotEmpty) {
       history += await _db.insertRestoredRemotePlays(plan.remoteHistory);
     }
+    final followed = await _db.mergeFollowedArtistRows([for (final s in snapshots) ...s.followedArtists]);
+    if (followed > 0) await _notifyFollowedArtists();
     return (
       playlists: plan.newPlaylists.length + plan.onlinePlaylists.where((i) => i.isNew).length,
       memberships: plan.newMemberships.length + onlineMemberships,
       history: history,
+      followed: followed,
       others: plan.otherDeviceSongs.length,
     );
+  }
+
+  /// Las filas ya quedaron escritas: refrescar la pantalla no puede hacer
+  /// fallar la importación.
+  Future<void> _notifyFollowedArtists() async {
+    try {
+      await _onFollowedArtistsChanged?.call();
+    } catch (e) {
+      appLog('FolderSyncService: falló el refresco de artistas seguidos (${e.runtimeType})');
+    }
   }
 }

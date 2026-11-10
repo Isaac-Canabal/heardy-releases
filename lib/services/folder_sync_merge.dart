@@ -30,6 +30,9 @@ class FolderImportPlan {
   /// existirán acá tras materializar; sin repetidos.
   final List<Map<String, dynamic>> remoteHistory;
 
+  /// `songId` locales que otro dispositivo marca como mix (mismo `fileHash`).
+  final List<String> songIdsToMarkAsMix;
+
   const FolderImportPlan({
     required this.newPlaylists,
     required this.newMemberships,
@@ -37,6 +40,7 @@ class FolderImportPlan {
     required this.otherDeviceSongs,
     this.onlinePlaylists = const [],
     this.remoteHistory = const [],
+    this.songIdsToMarkAsMix = const [],
   });
 }
 
@@ -157,6 +161,7 @@ FolderImportPlan planFolderImport({
     history: history,
     onlinePlaylists: onlinePlaylists,
     remoteHistory: remoteHistory,
+    songIdsToMarkAsMix: songIdsToMarkAsMix(localSongs, remote.songs),
     otherDeviceSongs: cloudOnlySongs(
       remote.songs,
       localFileHashes: localHashes,

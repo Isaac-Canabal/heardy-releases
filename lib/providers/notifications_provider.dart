@@ -7,6 +7,7 @@ import '../l10n/app_localizations_en.dart';
 import '../l10n/app_localizations_es.dart';
 import '../models/app_notification.dart';
 import '../providers/settings_provider.dart';
+import '../providers/update_gate_provider.dart';
 import '../services/app_update_source.dart';
 import '../services/cloud_source.dart';
 import '../services/system_notifications.dart';
@@ -14,9 +15,11 @@ import '../services/version_compare.dart';
 import 'package:heardy/services/app_log.dart';
 
 /// Apartado de notificaciones (Etapa 17): un único lugar donde conviven
-/// avisos de origen muy distinto — hoy solicitudes de amistad entrantes y
-/// "hay una versión nueva", mañana lo que haga falta — sin que cada uno
-/// necesite su propio ícono/pantalla.
+/// avisos de origen muy distinto — hoy las solicitudes de amistad entrantes,
+/// mañana lo que haga falta — sin que cada uno necesite su propio
+/// ícono/pantalla. La comprobación de versión también corre aquí, pero ya no
+/// es una fila de la lista: alimenta la puerta obligatoria (`UpdateGate`) y
+/// la notificación del sistema.
 ///
 /// **Nada de esto se persiste en una tabla propia.** Las solicitudes de
 /// amistad ya viven en el servidor (`CloudSource.getFriends`) y desaparecen
@@ -27,31 +30,31 @@ import 'package:heardy/services/app_log.dart';
 /// `SettingsProvider`, no una tabla nueva para una sola fila.
 ///
 /// **Disparadores: arranque en frío y `resumed`, igual que `SyncProvider`**
-/// (ver `main.dart`/`main_shell_screen.dart`) — nunca un timer propio.
+/// (ver `main.dart`/`main_shell_screen.dart`) — nunca un timer propio. El
+/// límite horario de `resumed` no aplica a la primera pasada ni mientras la
+/// última comprobación de versión haya fallado.
 class NotificationsProvider with ChangeNotifier {
   final CloudSource _cloudSource;
   final AppUpdateSource _updateSource;
   final Future<PackageInfo> Function() _packageInfo;
   final SystemNotifications _systemNotifications;
   final AppLanguage Function() _language;
+  final UpdateGateProvider? _updateGate;
 
-  static const _prefsKeyDismissedVersion = 'notifications_dismissed_update_version';
   static const _prefsKeyNotifiedVersion = 'notifications_system_notified_update_version';
   static const _prefsKeyNotifiedFriendUsernames = 'notifications_system_notified_friend_usernames';
   static const _resumeThrottle = Duration(hours: 1);
 
   List<FriendEntry> _incomingRequests = [];
-  AppUpdateInfo? _availableUpdate;
-  String? _dismissedVersion;
-  bool _dismissedVersionLoaded = false;
   // Lo que ya se mostró como notificación real del sistema — independiente
-  // de `_dismissedVersion`/de qué solicitudes siguen pendientes, para no
-  // repetir el aviso en cada chequeo horario mientras el usuario no actúa.
+  // de qué solicitudes siguen pendientes, para no repetir el aviso en cada
+  // chequeo horario mientras el usuario no actúa.
   String? _notifiedVersion;
   Set<String> _notifiedFriendUsernames = {};
   bool _systemNotifiedStateLoaded = false;
   DateTime? _lastRefresh;
   bool _refreshing = false;
+  bool _lastUpdateCheckOk = false;
 
   NotificationsProvider({
     required CloudSource cloudSource,
@@ -59,18 +62,19 @@ class NotificationsProvider with ChangeNotifier {
     Future<PackageInfo> Function()? packageInfo,
     SystemNotifications? systemNotifications,
     AppLanguage Function()? language,
+    UpdateGateProvider? updateGate,
   })  : _cloudSource = cloudSource,
         _updateSource = updateSource ?? GithubAppUpdateSource(),
         _packageInfo = packageInfo ?? PackageInfo.fromPlatform,
         _systemNotifications = systemNotifications ?? LocalSystemNotifications(),
-        _language = language ?? (() => AppLanguage.es);
+        _language = language ?? (() => AppLanguage.es),
+        _updateGate = updateGate;
 
   AppLocalizations get _l10n =>
       _language() == AppLanguage.en ? AppLocalizationsEn() : AppLocalizationsEs();
 
   List<AppNotification> get items => [
         for (final entry in _incomingRequests) AppNotification.friendRequest(entry),
-        if (_availableUpdate != null) AppNotification.appUpdate(_availableUpdate!),
       ];
 
   int get unreadCount => items.length;
@@ -82,7 +86,7 @@ class NotificationsProvider with ChangeNotifier {
 
   Future<void> onAppResumed() async {
     final last = _lastRefresh;
-    if (last != null && DateTime.now().difference(last) < _resumeThrottle) return;
+    if (last != null && _lastUpdateCheckOk && DateTime.now().difference(last) < _resumeThrottle) return;
     await refresh();
   }
 
@@ -146,26 +150,18 @@ class NotificationsProvider with ChangeNotifier {
   }
 
   Future<void> _refreshAvailableUpdate() async {
-    if (!_dismissedVersionLoaded) {
-      _dismissedVersionLoaded = true;
-      final prefs = await SharedPreferences.getInstance();
-      _dismissedVersion = prefs.getString(_prefsKeyDismissedVersion);
-    }
     await _loadSystemNotifiedState();
 
+    // `null` = sin red, límite de la API o ningún release publicado: no es
+    // una comprobación exitosa y nunca levanta un bloqueo ya conocido.
     final release = await _updateSource.getLatestRelease();
-    if (release == null) {
-      _availableUpdate = null;
-      return;
-    }
-    if (release.tag == _dismissedVersion) {
-      _availableUpdate = null;
-      return;
-    }
+    _lastUpdateCheckOk = release != null;
+    if (release == null) return;
+
+    await _updateGate?.recordRelease(release);
 
     final info = await _packageInfo();
     final isNewer = isNewerVersion(release.tag, info.version);
-    _availableUpdate = isNewer ? release : null;
 
     if (isNewer && release.tag != _notifiedVersion) {
       await _systemNotifications.showUpdateAvailable(
@@ -181,17 +177,6 @@ class NotificationsProvider with ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_prefsKeyNotifiedVersion, release.tag);
     }
-  }
-
-  /// El usuario ya vio esta versión — no volver a avisar de ella, aunque
-  /// siga siendo la última en GitHub. Una versión más nueva todavía sí avisa.
-  Future<void> dismissUpdate(String tag) async {
-    _dismissedVersion = tag;
-    _dismissedVersionLoaded = true;
-    if (_availableUpdate?.tag == tag) _availableUpdate = null;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_prefsKeyDismissedVersion, tag);
   }
 
   Future<void> respondToFriendRequest(

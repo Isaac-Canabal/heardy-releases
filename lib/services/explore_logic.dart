@@ -6,11 +6,12 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 
 import '../models/explore.dart';
+import '../models/followed_artist.dart';
 import '../models/song.dart';
 import 'download_source.dart';
 import 'stream_resolver.dart';
 
-enum ExploreShelfId { recent, artists, radio, charts, newReleases, home, moods }
+enum ExploreShelfId { recent, artists, radio, charts, newReleases, home, moods, followed, followedReleases }
 
 /// Las estanterías que dependen del país; el resto (historial, radio) no.
 const Set<ExploreShelfId> kRegionalShelves = {
@@ -21,6 +22,53 @@ const Set<ExploreShelfId> kRegionalShelves = {
 };
 
 bool isRegionalShelf(ExploreShelfId id) => kRegionalShelves.contains(id);
+
+/// El orden de la pantalla de arriba abajo. Distinto del enum, que sólo fija
+/// los nombres guardados.
+const List<ExploreShelfId> kDefaultExploreShelfOrder = [
+  ExploreShelfId.moods,
+  ExploreShelfId.recent,
+  ExploreShelfId.followed,
+  ExploreShelfId.followedReleases,
+  ExploreShelfId.radio,
+  ExploreShelfId.charts,
+  ExploreShelfId.newReleases,
+  ExploreShelfId.home,
+  ExploreShelfId.artists,
+];
+
+/// Las que sin acceso remoto se sustituyen, entre todas, por un solo aviso.
+const Set<ExploreShelfId> kExploreNetworkShelves = {
+  ExploreShelfId.followedReleases,
+  ExploreShelfId.radio,
+  ExploreShelfId.charts,
+  ExploreShelfId.newReleases,
+  ExploreShelfId.home,
+};
+
+/// Qué ocupa un sitio en Explorar, en orden. Sin acceso remoto ([online] falso)
+/// `moods` desaparece y de las de red sólo queda la primera visible: es el
+/// lugar del aviso.
+List<ExploreShelfId> exploreShelvesToShow({
+  required List<ExploreShelfId> order,
+  required Set<ExploreShelfId> hidden,
+  required bool online,
+}) {
+  final shelves = <ExploreShelfId>[];
+  var hintPlaced = false;
+  for (final id in order) {
+    if (hidden.contains(id)) continue;
+    if (!online) {
+      if (id == ExploreShelfId.moods) continue;
+      if (kExploreNetworkShelves.contains(id)) {
+        if (hintPlaced) continue;
+        hintPlaced = true;
+      }
+    }
+    shelves.add(id);
+  }
+  return shelves;
+}
 
 /// Lee los nombres guardados; ignora los desconocidos (p. ej. de otra versión).
 Set<ExploreShelfId> parseHiddenShelves(Iterable<String>? names) {
@@ -333,6 +381,66 @@ ExploreArtistHit? pickArtistHitForName(String name, List<ExploreArtistHit> hits)
   }
   return pickArtistHit(hits);
 }
+
+/// Cuántos artistas se consultan por carga de "Novedades": cada uno es una
+/// petición real, y el servidor limita a 120 por minuto y 5000 al día.
+const int kFollowedReleasesArtistCap = 15;
+
+/// Cuántos lanzamientos muestra la estantería de "Novedades".
+const int kFollowedReleasesCap = 30;
+
+/// Los [cap] artistas que se consultan: los seguidos más recientes.
+List<FollowedArtist> selectFollowedForReleases(
+  Iterable<FollowedArtist> artists, {
+  int cap = kFollowedReleasesArtistCap,
+}) {
+  final following = [for (final a in artists) if (a.isFollowing) a]
+    ..sort((a, b) => b.followedAt.compareTo(a.followedAt));
+  return following.take(cap).toList();
+}
+
+final _yearPattern = RegExp(r'(?<!\d)\d{4}(?!\d)');
+
+/// El año de un lanzamiento, o null: el servidor no da fecha exacta y a veces
+/// ni siquiera año.
+int? releaseYear(String year) {
+  final match = _yearPattern.firstMatch(year);
+  return match == null ? null : int.parse(match.group(0)!);
+}
+
+/// Los lanzamientos de varios artistas, sin repetir y sin los que no tienen
+/// `browseId`: los más nuevos primero, los que no tienen año al final y, a
+/// igual año, en el orden recibido (`sort` no es estable, de ahí el índice).
+List<ExploreAlbum> mergeFollowedReleases(List<List<ExploreAlbum>> sections, {int cap = kFollowedReleasesCap}) {
+  final seen = <String>{};
+  final albums = [
+    for (final section in sections)
+      for (final album in section)
+        if (album.browseId.isNotEmpty && seen.add(album.browseId)) album,
+  ];
+  final order = [
+    for (final (index, album) in albums.indexed) (album: album, index: index, year: releaseYear(album.year) ?? -1),
+  ]..sort((a, b) {
+      final byYear = b.year.compareTo(a.year);
+      return byYear != 0 ? byYear : a.index.compareTo(b.index);
+    });
+  return [for (final e in order.take(cap)) e.album];
+}
+
+/// Fallos que no son de un artista sino del servidor o la red: insistir con los
+/// demás sólo gastaría el límite de peticiones o haría esperar más.
+const Set<DownloadSourceErrorKind> _batchStoppingErrors = {
+  DownloadSourceErrorKind.notConfigured,
+  DownloadSourceErrorKind.network,
+  DownloadSourceErrorKind.unauthorized,
+  DownloadSourceErrorKind.quotaExceeded,
+  DownloadSourceErrorKind.antiBotBlocked,
+  DownloadSourceErrorKind.serviceUnavailable,
+  DownloadSourceErrorKind.serverCapacityExhausted,
+};
+
+bool stopsFollowedReleasesBatch(Object error) =>
+    error is DownloadSourceException && _batchStoppingErrors.contains(error.kind);
 
 /// Filtro de la búsqueda de Internet: canciones (yt-dlp `/search`) o uno de
 /// los tipos de `/explore/search`.

@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/ignored_recommendation.dart';
 import '../services/app_log.dart';
 import '../services/database_helper.dart';
 import '../services/folder_sync_service.dart';
+import '../services/library_diff.dart' show filterIgnoredRecommendations;
 import '../services/library_storage.dart';
 
 enum FolderSyncOutcome { none, ok, noLibraryFolder, failed }
@@ -42,13 +44,19 @@ class FolderSyncProvider with ChangeNotifier {
   FolderSyncReport? _lastReport;
   DateTime? _lastSyncAt;
   List<Map<String, dynamic>> _otherDeviceSongs = const [];
+  List<IgnoredRecommendation> _ignored = const [];
   List<LibraryEntry> _backups = const [];
 
   bool get isBusy => _busy;
   FolderSyncOutcome get outcome => _outcome;
   FolderSyncReport? get lastReport => _lastReport;
   DateTime? get lastSyncAt => _lastSyncAt;
-  List<Map<String, dynamic>> get otherDeviceSongs => _otherDeviceSongs;
+
+  /// Lo que otros dispositivos tienen y este no, sin lo que el usuario ignoró
+  /// acá. Lo ignorado es una preferencia local: no entra en ningún snapshot.
+  List<Map<String, dynamic>> get otherDeviceSongs => filterIgnoredRecommendations(_otherDeviceSongs, ignoredHashes);
+  List<IgnoredRecommendation> get ignoredRecommendations => _ignored;
+  Set<String> get ignoredHashes => {for (final r in _ignored) r.fileHash};
   List<LibraryEntry> get backups => _backups;
 
   Future<FolderSyncService> _service() async {
@@ -90,6 +98,7 @@ class FolderSyncProvider with ChangeNotifier {
       if (report.playlistsAdded + report.membershipsAdded + report.historyAdded > 0) {
         await _onImported?.call();
       }
+      _ignored = await _db.getIgnoredRecommendations();
       _otherDeviceSongs = await service.otherDeviceSongs(root);
       _backups = await service.listBackups(root);
     } catch (e) {
@@ -108,8 +117,42 @@ class FolderSyncProvider with ChangeNotifier {
 
   Future<void> restoreBackup(LibraryEntry backup) => _run((service, root) => service.restoreBackup(backup));
 
+  /// Relee las ignoradas de la base (no toca la carpeta).
+  Future<void> loadIgnored() async {
+    try {
+      _ignored = await _db.getIgnoredRecommendations();
+    } catch (e) {
+      appLog('FolderSyncProvider: no se pudieron leer las recomendaciones ignoradas (${e.runtimeType})');
+    }
+    notifyListeners();
+  }
+
+  /// [song] es una fila de [otherDeviceSongs] (o de la nube).
+  Future<void> ignoreRecommendation(Map<String, dynamic> song) async {
+    final hash = song['fileHash'] as String?;
+    if (hash == null || hash.isEmpty) return;
+    await _db.ignoreRecommendation(IgnoredRecommendation(
+      fileHash: hash,
+      title: (song['title'] as String?) ?? '',
+      artist: (song['artist'] as String?) ?? '',
+      ignoredAt: DateTime.now(),
+    ));
+    await loadIgnored();
+  }
+
+  Future<void> restoreRecommendation(String fileHash) async {
+    await _db.restoreIgnoredRecommendation(fileHash);
+    await loadIgnored();
+  }
+
+  Future<void> restoreAllRecommendations() async {
+    await _db.restoreAllIgnoredRecommendations();
+    await loadIgnored();
+  }
+
   /// Solo lectura: canciones de otros dispositivos y backups disponibles.
   Future<void> refresh() async {
+    await loadIgnored();
     final root = _libraryRoot();
     if (root == null) return;
     try {

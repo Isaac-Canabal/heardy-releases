@@ -1,12 +1,16 @@
 import 'dart:io';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
+import '../models/followed_artist.dart';
+import '../models/ignored_recommendation.dart';
+import '../models/mix_record.dart';
 import '../models/song.dart';
 import '../models/statistics_data.dart' show mergeTopSongRows;
 import '../models/playlist.dart';
 import '../models/remote_track_record.dart';
 import '../models/history_entry.dart';
 import 'explore_logic.dart' show youtubeVideoId;
+import 'followed_artists_merge.dart' show followedArtistChanges;
 import 'history_logic.dart' show maxStreamHistoryRows;
 import 'library_storage.dart';
 import 'smart_lists.dart';
@@ -30,7 +34,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 16,
+      version: 20,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: _onConfigure,
@@ -62,7 +66,8 @@ class DatabaseHelper {
         album TEXT,
         missing INTEGER NOT NULL DEFAULT 0,
         ignoredFromInbox INTEGER NOT NULL DEFAULT 0,
-        sourceUrl TEXT
+        sourceUrl TEXT,
+        isMix INTEGER NOT NULL DEFAULT 0
       )
     ''');
 
@@ -124,6 +129,9 @@ class DatabaseHelper {
     for (final sql in _onlinePlaylistSql) {
       await db.execute(sql);
     }
+    await db.execute(_createFollowedArtistsSql);
+    await db.execute(_createMixesSql);
+    await db.execute(_createIgnoredRecommendationsSql);
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -278,7 +286,72 @@ class DatabaseHelper {
         await db.execute(sql);
       }
     }
+    if (oldVersion < 17) {
+      // Artistas seguidos: sólo locales por ahora. Dejar de seguir conserva la
+      // fila con `unfollowedAt` para poder propagar la baja al sincronizar.
+      await db.execute(_createFollowedArtistsSql);
+    }
+    if (oldVersion < 18) {
+      // Heardy Mixer: registros de los mixes, cuyo audio vive en almacenamiento
+      // privado de la app. No son filas de `songs` ni se sincronizan.
+      await db.execute(_createMixesSql);
+    }
+    if (oldVersion < 19) {
+      // Un mix guardado en una playlist es una fila normal de `songs` marcada
+      // para que ninguna sincronización la saque del dispositivo. Igual que en
+      // v16, una migración interrumpida puede haber dejado ya la columna.
+      final songColumns = await db.rawQuery('PRAGMA table_info(songs)');
+      if (songColumns.isNotEmpty && !songColumns.any((c) => c['name'] == 'isMix')) {
+        await db.execute('ALTER TABLE songs ADD COLUMN isMix INTEGER NOT NULL DEFAULT 0');
+      }
+    }
+    if (oldVersion < 20) {
+      // Recomendaciones de "En tus otros dispositivos" que el usuario ignora en
+      // este dispositivo. Sólo local: nunca se sincroniza ni se exporta.
+      await db.execute(_createIgnoredRecommendationsSql);
+    }
   }
+
+  static const _createIgnoredRecommendationsSql = '''
+    CREATE TABLE IF NOT EXISTS ignored_recommendations (
+      fileHash TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      ignoredAt TEXT NOT NULL
+    )
+  ''';
+
+  static const _createFollowedArtistsSql = '''
+    CREATE TABLE IF NOT EXISTS followed_artists (
+      channelId TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      thumbnailUrl TEXT,
+      followedAt TEXT NOT NULL,
+      unfollowedAt TEXT
+    )
+  ''';
+
+  static const _createMixesSql = '''
+    CREATE TABLE IF NOT EXISTS mixes (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      songAId TEXT,
+      songBId TEXT,
+      remoteAId TEXT,
+      remoteBId TEXT,
+      titleA TEXT NOT NULL,
+      artistA TEXT NOT NULL,
+      titleB TEXT NOT NULL,
+      artistB TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      quality TEXT NOT NULL,
+      durationMs INTEGER NOT NULL,
+      filePath TEXT NOT NULL,
+      artPath TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      savedSongId TEXT
+    )
+  ''';
 
   static const _onlinePlaylistSql = [
     '''
@@ -1334,6 +1407,129 @@ class DatabaseHelper {
     return [for (final r in rows) HistoryEntry.fromStreamMap(r)];
   }
 
+  /// Los que se siguen ahora (sin las marcas de baja), el más reciente primero.
+  Future<List<FollowedArtist>> getFollowedArtists() async {
+    final db = await database;
+    final rows = await db.query('followed_artists', where: 'unfollowedAt IS NULL', orderBy: 'followedAt DESC');
+    return [for (final r in rows) FollowedArtist.fromMap(r)];
+  }
+
+  /// Seguir, o volver a seguir: reemplaza la fila y con ella la marca de baja.
+  Future<void> upsertFollowedArtist(FollowedArtist artist) async {
+    final db = await database;
+    await db.insert('followed_artists', artist.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// Conserva la fila y la primera marca de baja.
+  Future<void> markArtistUnfollowed(String channelId, DateTime at) async {
+    final db = await database;
+    await db.update(
+      'followed_artists',
+      {'unfollowedAt': at.toUtc().toIso8601String()},
+      where: 'channelId = ? AND unfollowedAt IS NULL',
+      whereArgs: [channelId],
+    );
+  }
+
+  /// Todas las filas, con las marcas de baja: es lo que se sincroniza.
+  Future<List<Map<String, dynamic>>> getFollowedArtistRowsForSync() async {
+    final db = await database;
+    return db.query('followed_artists');
+  }
+
+  /// Une filas de otros dispositivos y devuelve cuántas escribió. Lee y escribe
+  /// en una transacción para no pisar un Seguir que llegue a mitad de camino.
+  Future<int> mergeFollowedArtistRows(List<Map<String, dynamic>> remote) async {
+    if (remote.isEmpty) return 0;
+    final db = await database;
+    return db.transaction((txn) async {
+      final changes = followedArtistChanges(await txn.query('followed_artists'), remote);
+      for (final row in changes) {
+        await txn.insert('followed_artists', row, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      return changes.length;
+    });
+  }
+
+  Future<void> insertMix(MixRecord r) async {
+    final db = await database;
+    await db.insert('mixes', r.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// El más reciente primero.
+  Future<List<MixRecord>> getMixes() async {
+    final db = await database;
+    final rows = await db.query('mixes', orderBy: 'createdAt DESC');
+    return [for (final r in rows) MixRecord.fromMap(r)];
+  }
+
+  Future<MixRecord?> getMixById(String id) async {
+    final db = await database;
+    final rows = await db.query('mixes', where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : MixRecord.fromMap(rows.first);
+  }
+
+  Future<void> renameMix(String id, String name) async {
+    final db = await database;
+    await db.update('mixes', {'name': name}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> setMixSavedSong(String id, String songId) async {
+    final db = await database;
+    await db.update('mixes', {'savedSongId': songId}, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> markSongAsMix(String songId) async {
+    final db = await database;
+    await db.update('songs', {'isMix': 1}, where: 'id = ?', whereArgs: [songId]);
+  }
+
+  /// Suma la marca de mix a varias canciones (nunca la quita): la sincronización
+  /// la trae de otro dispositivo que ya sabe que ese archivo es un mix.
+  Future<void> markSongsAsMix(Iterable<String> songIds) async {
+    final ids = songIds.toList();
+    if (ids.isEmpty) return;
+    final db = await database;
+    await db.rawUpdate(
+      'UPDATE songs SET isMix = 1 WHERE isMix = 0 AND id IN (${List.filled(ids.length, '?').join(',')})',
+      ids,
+    );
+  }
+
+  Future<void> ignoreRecommendation(IgnoredRecommendation r) async {
+    final db = await database;
+    await db.insert('ignored_recommendations', r.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  /// La más reciente primero.
+  Future<List<IgnoredRecommendation>> getIgnoredRecommendations() async {
+    final db = await database;
+    final rows = await db.query('ignored_recommendations', orderBy: 'ignoredAt DESC, fileHash ASC');
+    return [for (final row in rows) IgnoredRecommendation.fromMap(row)];
+  }
+
+  Future<void> restoreIgnoredRecommendation(String fileHash) async {
+    final db = await database;
+    await db.delete('ignored_recommendations', where: 'fileHash = ?', whereArgs: [fileHash]);
+  }
+
+  Future<void> restoreAllIgnoredRecommendations() async {
+    final db = await database;
+    await db.delete('ignored_recommendations');
+  }
+
+  Future<bool> isMixSong(String songId) async {
+    final db = await database;
+    final rows = await db.query('songs', columns: ['isMix'], where: 'id = ?', whereArgs: [songId], limit: 1);
+    return rows.isNotEmpty && (rows.first['isMix'] as int? ?? 0) != 0;
+  }
+
+  /// Solo la fila: borrar el archivo es cosa de quien llama.
+  Future<void> deleteMixRecord(String id) async {
+    final db = await database;
+    await db.delete('mixes', where: 'id = ?', whereArgs: [id]);
+  }
+
   Future<void> clearStreamHistory() async {
     final db = await database;
     await db.delete('stream_history');
@@ -1510,13 +1706,26 @@ class DatabaseHelper {
   /// [includeOnline] suma las playlists online (con `kind: 'online'`, que las
   /// locales no llevan), sus pistas remotas y la pertenencia con orden. Es
   /// opt-in: sin él el resultado es el de siempre (solo playlists locales).
+  ///
+  /// Un mix guardado (`isMix`) es una canción más: entra con su pertenencia a
+  /// playlists. La marca viaja como `isMix: 1` y sólo en las filas que la
+  /// tienen, así el índice (y su hash) de quien no tiene mixes queda idéntico y
+  /// un servidor anterior, que rechaza claves desconocidas, sigue aceptándolo.
   Future<Map<String, List<Map<String, dynamic>>>> getLibraryIndexRows({bool includeOnline = false}) async {
     final db = await database;
-    final songs = await db.rawQuery('''
+    final songRows = await db.rawQuery('''
       SELECT id AS songId, title, artist, album, duration AS durationSeconds,
-             fileHash, hashKind, sourceUrl
+             fileHash, hashKind, sourceUrl, isMix
       FROM songs
     ''');
+    final songs = [
+      for (final row in songRows)
+        {
+          for (final entry in row.entries)
+            if (entry.key != 'isMix') entry.key: entry.value,
+          if ((row['isMix'] as int? ?? 0) != 0) 'isMix': 1,
+        },
+    ];
     final playlists = await db.rawQuery(includeOnline
         ? '''
       SELECT id AS playlistId, name, sortOrder, originalUrl, kind FROM playlists
@@ -1588,7 +1797,7 @@ class DatabaseHelper {
     final db = await database;
     return db.rawQuery('''
       SELECT ph.id, ph.songId, ph.playDate, ph.playDuration, ph.playedAtUtc,
-             s.id AS existingSongId
+             s.id AS existingSongId, COALESCE(s.isMix, 0) AS isMix
       FROM play_history ph
       LEFT JOIN songs s ON s.id = ph.songId
       WHERE ph.syncedAt IS NULL

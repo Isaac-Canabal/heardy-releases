@@ -107,6 +107,20 @@ List<Map<String, dynamic>> cloudOnlySongs(
   ];
 }
 
+/// Quita de [songs] las recomendaciones que el usuario ignoró en este
+/// dispositivo. Una fila sin `fileHash` nunca se oculta (no hay con qué
+/// identificarla).
+List<Map<String, dynamic>> filterIgnoredRecommendations(
+  List<Map<String, dynamic>> songs,
+  Set<String> ignoredHashes,
+) {
+  if (ignoredHashes.isEmpty) return songs;
+  return [
+    for (final song in songs)
+      if (!ignoredHashes.contains(song['fileHash'])) song,
+  ];
+}
+
 /// El trabajo de descarga de una fila de la nube, o `null` si no tiene
 /// `sourceUrl` (entonces sólo se puede emparejar por duración, ver
 /// `matchCloudSong`). Es un listado plano: el worker lo re-resuelve.
@@ -161,6 +175,7 @@ CanonicalCloudIndex canonicalizeCloudIndex(
       final first = songByHash[hash];
       if (first != null) {
         if (id != null) songRemap[id] = first['songId'] as String;
+        if (isMixRow(song)) first['isMix'] = 1;
         if ((first['sourceUrl'] as String?)?.isNotEmpty != true &&
             (song['sourceUrl'] as String?)?.isNotEmpty == true) {
           first['sourceUrl'] = song['sourceUrl'];
@@ -270,6 +285,33 @@ const _songColumns = [
   // original exacto en vez de buscar una coincidencia por duración.
   'sourceUrl',
 ];
+/// La marca de mix sólo viaja cuando vale 1 (como `kind` en las playlists): un
+/// servidor anterior rechaza claves desconocidas y el hash de quien no tiene
+/// mixes no cambia.
+bool isMixRow(Map<String, dynamic> row) => row['isMix'] == 1 || row['isMix'] == true;
+
+Map<String, dynamic> _projectSong(Map<String, dynamic> row) => {
+      ..._project(row, _songColumns),
+      if (isMixRow(row)) 'isMix': 1,
+    };
+
+/// Ids (de [local]) de canciones no marcadas como mix cuyo `fileHash` [remote]
+/// marca como mix: el archivo llegó por la herramienta de carpeta del usuario y
+/// el índice ya sabía que era un mix.
+List<String> songIdsToMarkAsMix(List<Map<String, dynamic>> local, List<Map<String, dynamic>> remote) {
+  final mixHashes = {
+    for (final row in remote)
+      if (isMixRow(row) && ((row['fileHash'] as String?) ?? '').isNotEmpty) row['fileHash'] as String,
+  };
+  return [
+    for (final row in local)
+      if (!isMixRow(row) &&
+          row['songId'] is String &&
+          mixHashes.contains(row['fileHash']))
+        row['songId'] as String,
+  ];
+}
+
 const _playlistColumns = [
   'playlistId',
   'name',
@@ -363,7 +405,7 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
   final localPlaylists = local['playlists'] ?? const [];
   final localPlaylistSongs = local['playlistSongs'] ?? const [];
 
-  final songs = [for (final row in localSongs) _project(row, _songColumns)];
+  final songs = [for (final row in localSongs) _projectSong(row)];
   final songIds = <String>{};
   final localIdByHash = <String, String>{};
   final rowById = <String, Map<String, dynamic>>{};
@@ -395,6 +437,7 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
       // que un equipo que reconstruyó su biblioteca escaneando siempre lo
       // tiene vacío y, sin esto, lo borraría del índice de todos los demás.
       final row = rowById[localId];
+      if (row != null && isMixRow(cloudSong)) row['isMix'] = 1;
       final cloudSourceUrl = cloudSong['sourceUrl'] as String?;
       if (row != null &&
           cloudSourceUrl != null &&
@@ -406,7 +449,7 @@ Map<String, List<Map<String, dynamic>>> unionCloudIntoLocalIndex({
     }
     if (songIds.contains(id)) continue;
 
-    songs.add(_project(cloudSong, _songColumns));
+    songs.add(_projectSong(cloudSong));
     songIds.add(id);
     rowById[id] = songs.last;
     if (hash != null && hash.isNotEmpty) localIdByHash.putIfAbsent(hash, () => id);

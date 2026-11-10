@@ -3,14 +3,38 @@ import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
+import '../models/now_playing_layout.dart';
 import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_tray_service.dart';
 import '../services/open_artist_profile.dart';
 import '../services/stream_queue_logic.dart';
+import '../providers/settings_provider.dart';
+import '../theme/app_theme.dart';
+import '../theme/area_colors.dart';
 import 'add_current_track.dart';
+import 'marquee_title.dart';
 import 'playback_options_sheet.dart';
 import 'desktop_playback_bar.dart' show DesktopVolumeControl;
+
+PlaybackControlColors _controlColors(BuildContext context) =>
+    resolvePlaybackControlColors(
+      context.select<SettingsProvider, Color?>(
+        (s) => s.areaColor(ColorArea.playbackControls),
+      ),
+      accent: AppTheme.playerAccentOf(context),
+    );
+
+Color _titleColor(BuildContext context) => resolveAreaColor(
+      context.select<SettingsProvider, Color?>(
+        (s) => s.areaColor(ColorArea.nowPlayingTitle),
+      ),
+      Colors.white,
+    );
+
+NowPlayingTitleAlign _titleAlign(BuildContext context) => context.select<SettingsProvider, NowPlayingTitleAlign>(
+      (s) => s.nowPlayingTitleAlign,
+    );
 
 /// El "reproduciendo ahora" del escritorio: la misma información que
 /// `NowPlayingScreen` en el teléfono (carátula, título, artista, controles),
@@ -143,10 +167,15 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
               ? _buildExpanded(context, audioHandler, item)
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    final artSize = math.min(
-                      constraints.maxWidth - 56,
-                      constraints.maxHeight * 0.34,
+                    final artSize = desktopPanelArtSize(
+                      context.select<SettingsProvider, NowPlayingArtSize>(
+                        (s) => s.nowPlayingArtSize,
+                      ),
+                      maxWidth: constraints.maxWidth,
+                      maxHeight: constraints.maxHeight,
+                      textScale: MediaQuery.textScalerOf(context).scale(1),
                     );
+                    final titleAlign = _titleAlign(context);
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -174,14 +203,13 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
                           child: Column(
+                            crossAxisAlignment: titleAlign.crossAxis,
                             children: [
-                              Text(
+                              MarqueeTitle(
                                 item.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                textAlign: titleAlign.textAlign,
+                                style: TextStyle(
+                                  color: _titleColor(context),
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -240,6 +268,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
     AudioPlayerHandler audioHandler,
     MediaItem item,
   ) {
+    final titleAlign = _titleAlign(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -305,23 +334,27 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                           },
                         ),
                         const SizedBox(height: 14),
-                        Text(
+                        MarqueeTitle(
                           item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          textAlign: titleAlign.textAlign,
+                          style: TextStyle(
+                            color: _titleColor(context),
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
                         const SizedBox(height: 4),
-                        _artistLink(item, 13),
+                        // Sin `Align` en el centro para que lo predeterminado
+                        // siga dibujándose como siempre.
+                        if (titleAlign == NowPlayingTitleAlign.center)
+                          _artistLink(item, 13)
+                        else
+                          Align(alignment: titleAlign.alignment, child: _artistLink(item, 13)),
                         const SizedBox(height: 12),
                         _Controls(audioHandler: audioHandler),
                         const SizedBox(height: 12),
                         WaveformSeekSection(
+                          activeColor: _controlColors(context).accent,
                           compact: true,
                           mediaItem: item,
                           positionStream: audioHandler.player.positionStream,
@@ -381,6 +414,9 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
     MediaItem? item,
   ) {
     final l10n = AppLocalizations.of(context)!;
+    final panelOnLeft = context.select<SettingsProvider, bool>(
+      (s) => s.desktopPanelSide == DesktopPanelSide.left,
+    );
     final playlistId = item?.extras?['playlist_id'] as String?;
     final playlistName = item?.album ?? '';
     final label = playlistName.isNotEmpty
@@ -403,8 +439,10 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
         children: [
           IconButton(
             tooltip: l10n.desktopHideNowPlaying,
-            icon: const Icon(
-              Icons.keyboard_double_arrow_right_rounded,
+            icon: Icon(
+              panelOnLeft
+                  ? Icons.keyboard_double_arrow_left_rounded
+                  : Icons.keyboard_double_arrow_right_rounded,
               color: Colors.white70,
             ),
             onPressed: widget.onClose,
@@ -430,7 +468,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                   : l10n.repeatCountTitle,
               icon: Icon(
                 Icons.repeat_one,
-                color: remaining > 0 ? const Color(0xFF8C9EFF) : Colors.white70,
+                color: remaining > 0 ? _controlColors(context).accent : Colors.white70,
               ),
               onPressed: () => showRepeatCountSheet(context, audioHandler),
             ),
@@ -444,7 +482,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                 tooltip: l10n.playbackSpeedTitle,
                 icon: Icon(
                   Icons.speed,
-                  color: changed ? const Color(0xFF8C9EFF) : Colors.white70,
+                  color: changed ? _controlColors(context).accent : Colors.white70,
                 ),
                 onPressed: () => showPlaybackSpeedSheet(context, audioHandler),
               );
@@ -461,7 +499,7 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                   tooltip: l10n.nowPlayingSleepTimerTitle,
                   icon: Icon(
                     active ? Icons.bedtime : Icons.bedtime_outlined,
-                    color: active ? const Color(0xFF8C9EFF) : Colors.white70,
+                    color: active ? _controlColors(context).accent : Colors.white70,
                   ),
                   onPressed: () => active
                       ? audioHandler.cancelSleepTimer()
@@ -555,7 +593,8 @@ class _Controls extends StatelessWidget {
         final shuffle = state?.shuffleMode == AudioServiceShuffleMode.all;
         final repeat = state?.repeatMode ?? AudioServiceRepeatMode.none;
         final repeatOn = repeat != AudioServiceRepeatMode.none;
-        const active = Color(0xFF8C9EFF);
+        final colors = _controlColors(context);
+        final active = colors.accent;
 
         return Row(
           mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -574,24 +613,24 @@ class _Controls extends StatelessWidget {
               ),
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.skip_previous_rounded,
                 size: 34,
-                color: Colors.white,
+                color: colors.icon,
               ),
               onPressed: () => audioHandler.skipToPrevious(),
             ),
             Container(
               width: 56,
               height: 56,
-              decoration: const BoxDecoration(
+              decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white,
+                color: colors.playButton,
               ),
               child: IconButton(
                 icon: Icon(
                   playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.black,
+                  color: colors.playIcon,
                   size: 32,
                 ),
                 onPressed: () =>
@@ -599,10 +638,10 @@ class _Controls extends StatelessWidget {
               ),
             ),
             IconButton(
-              icon: const Icon(
+              icon: Icon(
                 Icons.skip_next_rounded,
                 size: 34,
-                color: Colors.white,
+                color: colors.icon,
               ),
               onPressed: () => audioHandler.skipToNext(),
             ),

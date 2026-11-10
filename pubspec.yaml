@@ -1,7 +1,7 @@
 name: heardy
 description: An offline-first local music library player.
 publish_to: 'none'
-version: 1.2.5+16
+version: 1.2.6+17
 
 environment:
   sdk: '>=3.12.0 <4.0.0'
@@ -141,3 +141,28 @@ flutter:
   generate: true
   assets:
     - assets/icon/
+    - assets/fonts/nunito/OFL.txt
+    - assets/fonts/lora/OFL.txt
+    - assets/fonts/ibm_plex_mono/OFL.txt
+  fonts:
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/nunito/Nunito-Regular.ttf
+        - asset: assets/fonts/nunito/Nunito-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/nunito/Nunito-Bold.ttf
+          weight: 700
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/lora/Lora-Regular.ttf
+        - asset: assets/fonts/lora/Lora-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/lora/Lora-Bold.ttf
+          weight: 700
+    - family: IBM Plex Mono
+      fonts:
+        - asset: assets/fonts/ibm_plex_mono/IBMPlexMono-Regular.ttf
+        - asset: assets/fonts/ibm_plex_mono/IBMPlexMono-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/ibm_plex_mono/IBMPlexMono-Bold.ttf
+          weight: 700

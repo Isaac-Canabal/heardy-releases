@@ -1,22 +1,52 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:provider/provider.dart';
 import '../services/audio_player_handler.dart';
 import '../services/stream_queue_logic.dart';
+import '../providers/settings_provider.dart';
 import '../theme/app_theme.dart';
+import '../theme/area_colors.dart';
 import '../screens/now_playing_screen.dart';
 import '../l10n/app_localizations.dart';
 import 'desktop_shell_scope.dart';
 
-/// Alto del mini-reproductor: barra de progreso de 3 + cuerpo de 68.
+/// Alto de la barra de progreso sobre el cuerpo del mini-reproductor.
+const double _progressHeight = 3;
+
+/// Alto del mini-reproductor sin texto agrandado: barra de progreso + cuerpo
+/// de 68.
 const double kMiniPlayerHeight = 71;
+
+const double _titleFontSize = 14;
+const double _artistFontSize = 12;
+const double _labelsGap = 2;
+
+/// Alto de línea holgado: cubre las fuentes empaquetadas y las de reserva del
+/// sistema (CJK, árabe), que son más altas.
+const double _lineHeightFactor = 1.5;
+
+/// Borde superior más aire alrededor del texto.
+const double _labelsMargin = 9;
+
+/// Alto del cuerpo: el de siempre, salvo que el texto ya no quepa en él.
+double miniPlayerBodyHeight(TextScaler textScaler) {
+  final labels = (textScaler.scale(_titleFontSize) + textScaler.scale(_artistFontSize)) *
+          _lineHeightFactor +
+      _labelsGap;
+  return math.max(68, labels + _labelsMargin);
+}
 
 /// Alto que una pantalla debe dejar libre abajo para que el mini-reproductor
 /// (superpuesto en el shell) no tape sus controles. En escritorio la barra de
 /// reproducción es otra y no se superpone.
-double miniPlayerReservedHeight({required bool hasMedia, required bool desktopShell}) =>
-    hasMedia && !desktopShell ? kMiniPlayerHeight : 0;
+double miniPlayerReservedHeight({
+  required bool hasMedia,
+  required bool desktopShell,
+  TextScaler textScaler = TextScaler.noScaling,
+}) =>
+    hasMedia && !desktopShell ? _progressHeight + miniPlayerBodyHeight(textScaler) : 0;
 
 /// Espacio que sube los controles fijos al pie de una pantalla (p. ej. la
 /// barra de acciones de la bandeja) por encima del mini-reproductor.
@@ -30,8 +60,52 @@ class MiniPlayerInset extends StatelessWidget {
     return StreamBuilder<MediaItem?>(
       stream: audioHandler.mediaItem,
       builder: (context, snapshot) => SizedBox(
-        height: miniPlayerReservedHeight(hasMedia: snapshot.data != null, desktopShell: desktop),
+        height: miniPlayerReservedHeight(
+          hasMedia: snapshot.data != null,
+          desktopShell: desktop,
+          textScaler: MediaQuery.textScalerOf(context),
+        ),
       ),
+    );
+  }
+}
+
+/// Título y artista del mini-reproductor. Es un widget aparte porque
+/// [MiniPlayer] necesita el `AudioPlayerHandler` real y así el desborde se
+/// puede probar con las fuentes de verdad.
+class MiniPlayerTrackLabels extends StatelessWidget {
+  final String title;
+  final String artist;
+
+  const MiniPlayerTrackLabels({super.key, required this.title, required this.artist});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: _titleFontSize,
+          ),
+        ),
+        const SizedBox(height: _labelsGap),
+        Text(
+          artist,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: _artistFontSize,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -48,6 +122,12 @@ class MiniPlayer extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final audioHandler = Provider.of<AudioPlayerHandler>(context);
+    final colors = resolveMiniPlayerColors(
+      context.select<SettingsProvider, Color?>(
+        (s) => s.areaColor(ColorArea.miniPlayer),
+      ),
+      progress: AppTheme.accent,
+    );
 
     return StreamBuilder<MediaItem?>(
       stream: audioHandler.mediaItem,
@@ -76,14 +156,14 @@ class MiniPlayer extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: progress.clamp(0.0, 1.0),
                       backgroundColor: Colors.white.withValues(alpha: 0.08),
-                      valueColor: AlwaysStoppedAnimation<Color>(AppTheme.accent),
-                      minHeight: 3,
+                      valueColor: AlwaysStoppedAnimation<Color>(colors.progress),
+                      minHeight: _progressHeight,
                     ),
                   );
                 },
               ),
               Container(
-                height: 68,
+                height: miniPlayerBodyHeight(MediaQuery.textScalerOf(context)),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
@@ -115,31 +195,9 @@ class MiniPlayer extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            mediaItem.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            mediaItem.artist ?? AppLocalizations.of(context)!.commonUnknownArtist,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.45),
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
+                      child: MiniPlayerTrackLabels(
+                        title: mediaItem.title,
+                        artist: mediaItem.artist ?? AppLocalizations.of(context)!.commonUnknownArtist,
                       ),
                     ),
                     IconButton(
@@ -153,7 +211,10 @@ class MiniPlayer extends StatelessWidget {
                         final playing = stateSnapshot.data?.playing ?? false;
                         return Container(
                           decoration: BoxDecoration(
-                            gradient: AppTheme.primaryGradient,
+                            color: colors.playButton,
+                            gradient: colors.playButton == null
+                                ? AppTheme.primaryGradient
+                                : null,
                             shape: BoxShape.circle,
                           ),
                           child: IconButton(
@@ -161,7 +222,7 @@ class MiniPlayer extends StatelessWidget {
                               playing
                                   ? Icons.pause_rounded
                                   : Icons.play_arrow_rounded,
-                              color: Colors.white,
+                              color: colors.playIcon,
                               size: 28,
                             ),
                             onPressed: () {

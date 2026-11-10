@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
 import '../models/explore.dart';
+import '../models/followed_artist.dart';
 import '../models/song.dart';
 import '../providers/auth_provider.dart';
 import '../providers/explore_provider.dart';
+import '../providers/followed_artists_provider.dart';
 import '../providers/music_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/audio_player_handler.dart';
@@ -25,6 +27,8 @@ import 'auth/login_screen.dart';
 import 'explore_artist_screen.dart';
 import 'explore_collection_screen.dart';
 import 'explore_mood_screen.dart';
+import 'heardy_mixer_screen.dart';
+import 'mixes_screen.dart';
 import 'search_screen.dart';
 
 /// Pestaña Explorar: estanterías locales (historial, funcionan sin red) y de
@@ -47,10 +51,12 @@ class _ExploreScreenState extends State<ExploreScreen>
   bool _networkRequested = false;
   bool _startingPlay = false;
   String? _resolvingArtist;
+  late int _followedRevision;
 
   @override
   void initState() {
     super.initState();
+    _followedRevision = context.read<FollowedArtistsProvider>().revision;
     initRemoteTrackActions();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _onActivated());
@@ -213,8 +219,19 @@ class _ExploreScreenState extends State<ExploreScreen>
     final chosen = hit;
     navigator.push(ExploreArtistScreen.route(
       name: chosen.name,
+      channelId: chosen.channelId,
       thumbnailUrl: chosen.thumbnailUrl,
       loader: () => source.exploreArtist(chosen.channelId),
+    ));
+  }
+
+  void _openFollowed(ExploreRelatedArtist artist) {
+    final source = context.read<DownloadSource>();
+    Navigator.of(context).push(ExploreArtistScreen.route(
+      name: artist.name,
+      channelId: artist.channelId,
+      thumbnailUrl: artist.thumbnailUrl,
+      loader: () => source.exploreArtist(artist.channelId),
     ));
   }
 
@@ -248,6 +265,7 @@ class _ExploreScreenState extends State<ExploreScreen>
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final provider = context.watch<ExploreProvider>();
+    final followed = context.watch<FollowedArtistsProvider>();
     final gate = remoteAccessGate(
       hasServer: context.watch<SettingsProvider>().hasDownloadServer,
       isSignedIn: context.watch<HeardyAuthProvider>().isReady,
@@ -261,13 +279,26 @@ class _ExploreScreenState extends State<ExploreScreen>
           if (mounted) context.read<ExploreProvider>().loadNetwork();
         });
       }
+      // Seguir o dejar de seguir (también desde un perfil abierto encima)
+      // actualiza las novedades; con la pestaña oculta espera a que se abra.
+      if (widget.active && followed.revision != _followedRevision) {
+        _followedRevision = followed.revision;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) context.read<ExploreProvider>().syncFollowedReleases();
+        });
+      }
     } else {
       _networkRequested = false;
     }
 
-    final hidden = context.watch<SettingsProvider>().exploreHiddenShelves;
-    final moods = hidden.contains(ExploreShelfId.moods) ? const <ExploreMood>[] : flattenMoods(provider.moods.data ?? const []);
+    final settings = context.watch<SettingsProvider>();
+    final hidden = settings.exploreHiddenShelves;
     final allHidden = hidden.length >= ExploreShelfId.values.length;
+    final shelves = exploreShelvesToShow(
+      order: settings.exploreShelfOrder,
+      hidden: hidden,
+      online: gate == RemoteAccessGate.ok,
+    );
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: _refresh,
@@ -275,22 +306,12 @@ class _ExploreScreenState extends State<ExploreScreen>
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(child: _buildHeader(l10n)),
-            if (gate == RemoteAccessGate.ok && moods.isNotEmpty)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 16),
-                  child: MoodChipsRow(moods: moods, onTap: _openMood),
-                ),
-              ),
             SliverList(
               delegate: SliverChildListDelegate([
                 if (allHidden)
                   _buildAllHidden(l10n)
-                else ...[
-                  if (!hidden.contains(ExploreShelfId.recent)) _buildRecent(l10n, provider),
-                  ..._buildNetworkShelves(l10n, provider, gate, hidden),
-                  if (!hidden.contains(ExploreShelfId.artists)) _buildArtists(l10n, provider),
-                ],
+                else
+                  for (final id in shelves) ?_buildShelf(id, l10n, provider, followed, gate),
                 const SizedBox(height: 100),
               ]),
             ),
@@ -318,6 +339,12 @@ class _ExploreScreenState extends State<ExploreScreen>
                     letterSpacing: -0.5,
                   ),
                 ),
+              ),
+              IconButton(
+                key: const Key('explore_mixer_button'),
+                tooltip: l10n.mixerTitle,
+                icon: const Icon(Icons.multitrack_audio_rounded, color: Colors.white),
+                onPressed: () => Navigator.of(context).push(HeardyMixerScreen.route()),
               ),
               IconButton(
                 key: const Key('explore_customize_button'),
@@ -360,7 +387,48 @@ class _ExploreScreenState extends State<ExploreScreen>
               ),
             ),
           ),
+          const SizedBox(height: 10),
+          _buildMixesEntry(l10n),
         ],
+      ),
+    );
+  }
+
+  /// Entrada fija, no una estantería: es local (sin sesión ni red) y no se
+  /// oculta ni se ordena con las demás.
+  Widget _buildMixesEntry(AppLocalizations l10n) {
+    return Material(
+      color: Colors.white.withValues(alpha: 0.05),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        key: const Key('explore_mixes_entry'),
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => Navigator.of(context).push(MixesScreen.route()),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.queue_music_rounded, color: AppTheme.primaryLight),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(l10n.mixesTitle,
+                        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700)),
+                    Text(
+                      l10n.mixesEntrySubtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: Colors.white.withValues(alpha: 0.5)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -403,78 +471,123 @@ class _ExploreScreenState extends State<ExploreScreen>
     );
   }
 
-  List<Widget> _buildNetworkShelves(
+  /// Local: se muestra sin sesión. Sin ella, el perfil abre con cabecera y
+  /// botón de seguir, y su contenido ofrece reintentar.
+  Widget _buildFollowed(AppLocalizations l10n, FollowedArtistsProvider followed) {
+    return ExploreShelfFrame<List<FollowedArtist>>(
+      title: l10n.exploreFollowedTitle,
+      trailing: _sectionMenu(ExploreShelfId.followed),
+      state: followed.isLoaded ? ShelfState.data(followed.followed) : const ShelfState.idle(),
+      onRetry: followed.load,
+      skeleton: const ExploreCardsSkeleton(size: ExploreRelatedArtistsRow.size, circle: true),
+      isEmpty: (artists) => artists.isEmpty,
+      emptyState: ExploreEmptyNote(l10n.exploreFollowedEmpty),
+      builder: (artists) => ExploreRelatedArtistsRow(
+        artists: [
+          for (final a in artists)
+            ExploreRelatedArtist(channelId: a.channelId, name: a.name, thumbnailUrl: a.thumbnailUrl),
+        ],
+        onTap: _openFollowed,
+      ),
+    );
+  }
+
+  Widget? _buildMoods(ExploreProvider provider) {
+    final moods = flattenMoods(provider.moods.data ?? const []);
+    if (moods.isEmpty) return null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: MoodChipsRow(moods: moods, onTap: _openMood),
+    );
+  }
+
+  /// null si esta estantería no tiene nada que dibujar. Sin acceso remoto, la
+  /// de red que llega aquí es el sitio del aviso (ver [exploreShelvesToShow]).
+  Widget? _buildShelf(
+    ExploreShelfId id,
     AppLocalizations l10n,
     ExploreProvider provider,
+    FollowedArtistsProvider followed,
     RemoteAccessGate gate,
-    Set<ExploreShelfId> hidden,
   ) {
-    const network = [ExploreShelfId.radio, ExploreShelfId.charts, ExploreShelfId.newReleases, ExploreShelfId.home];
-    if (network.every(hidden.contains)) return const [];
-    if (gate != RemoteAccessGate.ok) {
-      return [
-        ExploreHintCard(
-          title: l10n.exploreOnlineHintTitle,
-          body: gate == RemoteAccessGate.noServer ? l10n.exploreNeedsServerBody : l10n.exploreNeedsLoginBody,
-          actionLabel: gate == RemoteAccessGate.needsLogin ? l10n.authRequiredButton : null,
-          onAction: gate == RemoteAccessGate.needsLogin ? _openLogin : null,
-        ),
-      ];
+    if (gate != RemoteAccessGate.ok && kExploreNetworkShelves.contains(id)) {
+      return ExploreHintCard(
+        title: l10n.exploreOnlineHintTitle,
+        body: gate == RemoteAccessGate.noServer ? l10n.exploreNeedsServerBody : l10n.exploreNeedsLoginBody,
+        actionLabel: gate == RemoteAccessGate.needsLogin ? l10n.authRequiredButton : null,
+        onAction: gate == RemoteAccessGate.needsLogin ? _openLogin : null,
+      );
     }
-    return [
-      if (!hidden.contains(ExploreShelfId.radio))
-      ExploreShelfFrame<List<RemoteTrack>>(
-        title: l10n.exploreRadioTitle,
-        trailing: _sectionMenu(ExploreShelfId.radio),
-        state: provider.radio,
-        onRetry: () => provider.reloadShelf(ExploreShelfId.radio),
-        skeleton: const ExploreCardsSkeleton(size: RemoteTrackCard.size),
-        isEmpty: (tracks) => tracks.isEmpty,
-        builder: (tracks) => _tracksRow(tracks),
-      ),
-      if (!hidden.contains(ExploreShelfId.charts))
-      ExploreShelfFrame<List<ExplorePlaylist>>(
-        title: l10n.exploreChartsTitle,
-        trailing: _sectionMenu(ExploreShelfId.charts),
-        state: provider.charts,
-        onRetry: () => provider.reloadShelf(ExploreShelfId.charts),
-        skeleton: const ExploreCardsSkeleton(size: 160),
-        isEmpty: (l) => l.isEmpty,
-        builder: (l) => ExplorePlaylistsRow(playlists: l, onTap: _openPlaylist),
-      ),
-      if (!hidden.contains(ExploreShelfId.newReleases))
-      ExploreShelfFrame<List<ExploreAlbum>>(
-        title: l10n.exploreNewReleasesTitle,
-        trailing: _sectionMenu(ExploreShelfId.newReleases),
-        state: provider.newReleases,
-        onRetry: () => provider.reloadShelf(ExploreShelfId.newReleases),
-        skeleton: const ExploreCardsSkeleton(),
-        isEmpty: (l) => l.isEmpty,
-        builder: (l) => ExploreAlbumsRow(albums: l, onTap: _openAlbum),
-      ),
-      if (!hidden.contains(ExploreShelfId.home))
-      ExploreShelfFrame<List<ExploreShelf>>(
-        title: null,
-        state: provider.home,
-        onRetry: () => provider.reloadShelf(ExploreShelfId.home),
-        skeleton: const _HomeSkeleton(),
-        isEmpty: (l) => l.isEmpty,
-        builder: (shelves) => Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final (i, shelf) in shelves.indexed) ...[
-              ExploreShelfHeader(shelf.title, trailing: i == 0 ? _sectionMenu(ExploreShelfId.home) : null),
-              switch (shelf.kind) {
-                ExploreShelfKind.playlists =>
-                  ExplorePlaylistsRow(playlists: shelf.playlists, onTap: _openPlaylist),
-                ExploreShelfKind.albums => ExploreAlbumsRow(albums: shelf.albums, onTap: _openAlbum),
-                ExploreShelfKind.tracks => _tracksRow(shelf.tracks, upscale: true),
-              },
-            ],
-          ],
+    return switch (id) {
+      ExploreShelfId.moods => _buildMoods(provider),
+      ExploreShelfId.recent => _buildRecent(l10n, provider),
+      ExploreShelfId.followed => _buildFollowed(l10n, followed),
+      ExploreShelfId.artists => _buildArtists(l10n, provider),
+      ExploreShelfId.followedReleases when followed.followed.isEmpty => null,
+      ExploreShelfId.followedReleases =>
+        ExploreShelfFrame<List<ExploreAlbum>>(
+          title: l10n.exploreFollowedReleasesTitle,
+          trailing: _sectionMenu(ExploreShelfId.followedReleases),
+          state: provider.followedReleases,
+          onRetry: () => provider.reloadShelf(ExploreShelfId.followedReleases),
+          skeleton: const ExploreCardsSkeleton(),
+          isEmpty: (l) => l.isEmpty,
+          emptyState: ExploreEmptyNote(l10n.exploreFollowedReleasesEmpty),
+          builder: (l) => ExploreAlbumsRow(albums: l, onTap: _openAlbum),
         ),
-      ),
-    ];
+      ExploreShelfId.radio =>
+        ExploreShelfFrame<List<RemoteTrack>>(
+          title: l10n.exploreRadioTitle,
+          trailing: _sectionMenu(ExploreShelfId.radio),
+          state: provider.radio,
+          onRetry: () => provider.reloadShelf(ExploreShelfId.radio),
+          skeleton: const ExploreCardsSkeleton(size: RemoteTrackCard.size),
+          isEmpty: (tracks) => tracks.isEmpty,
+          builder: (tracks) => _tracksRow(tracks),
+        ),
+      ExploreShelfId.charts =>
+        ExploreShelfFrame<List<ExplorePlaylist>>(
+          title: l10n.exploreChartsTitle,
+          trailing: _sectionMenu(ExploreShelfId.charts),
+          state: provider.charts,
+          onRetry: () => provider.reloadShelf(ExploreShelfId.charts),
+          skeleton: const ExploreCardsSkeleton(size: 160),
+          isEmpty: (l) => l.isEmpty,
+          builder: (l) => ExplorePlaylistsRow(playlists: l, onTap: _openPlaylist),
+        ),
+      ExploreShelfId.newReleases =>
+        ExploreShelfFrame<List<ExploreAlbum>>(
+          title: l10n.exploreNewReleasesTitle,
+          trailing: _sectionMenu(ExploreShelfId.newReleases),
+          state: provider.newReleases,
+          onRetry: () => provider.reloadShelf(ExploreShelfId.newReleases),
+          skeleton: const ExploreCardsSkeleton(),
+          isEmpty: (l) => l.isEmpty,
+          builder: (l) => ExploreAlbumsRow(albums: l, onTap: _openAlbum),
+        ),
+      ExploreShelfId.home =>
+        ExploreShelfFrame<List<ExploreShelf>>(
+          title: null,
+          state: provider.home,
+          onRetry: () => provider.reloadShelf(ExploreShelfId.home),
+          skeleton: const _HomeSkeleton(),
+          isEmpty: (l) => l.isEmpty,
+          builder: (shelves) => Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final (i, shelf) in shelves.indexed) ...[
+                ExploreShelfHeader(shelf.title, trailing: i == 0 ? _sectionMenu(ExploreShelfId.home) : null),
+                switch (shelf.kind) {
+                  ExploreShelfKind.playlists =>
+                    ExplorePlaylistsRow(playlists: shelf.playlists, onTap: _openPlaylist),
+                  ExploreShelfKind.albums => ExploreAlbumsRow(albums: shelf.albums, onTap: _openAlbum),
+                  ExploreShelfKind.tracks => _tracksRow(shelf.tracks, upscale: true),
+                },
+              ],
+            ],
+          ),
+        ),
+    };
   }
 
   Widget _tracksRow(List<RemoteTrack> tracks, {bool upscale = false}) {

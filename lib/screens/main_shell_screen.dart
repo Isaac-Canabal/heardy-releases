@@ -13,6 +13,7 @@ import '../services/desktop_mini_mode_service.dart';
 import '../services/desktop_tray_service.dart';
 import '../widgets/desktop_mini_player_view.dart';
 import '../theme/app_theme.dart';
+import '../theme/area_colors.dart';
 import '../widgets/desktop_now_playing_panel.dart';
 import '../widgets/desktop_playback_bar.dart';
 import '../widgets/desktop_shell_scope.dart';
@@ -20,6 +21,9 @@ import '../widgets/max_width_center.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/server_capacity_gate.dart';
 import '../l10n/app_localizations.dart';
+import '../models/nav_tab.dart';
+import '../models/now_playing_layout.dart';
+import '../theme/nav_tabs.dart';
 import 'auth/login_screen.dart';
 import 'home_screen.dart';
 import 'import_screen.dart';
@@ -27,11 +31,6 @@ import 'inbox_screen.dart';
 import 'playlist_detail_screen.dart';
 import 'explore_screen.dart';
 import 'settings_screen.dart';
-
-/// Posición de Explorar en las pestañas (y en la barra lateral de escritorio).
-/// Ocupa el hueco que tenía Buscar: la búsqueda ahora es una ruta que se abre
-/// desde Explorar.
-const int _exploreTab = 3;
 
 class MainShellScreen extends StatefulWidget {
   const MainShellScreen({super.key});
@@ -45,7 +44,7 @@ class _MainShellScreenState extends State<MainShellScreen>
   // Un `ValueNotifier` y no un `int` en `setState`: en el escritorio las
   // pestañas viven dentro de la ruta raíz de un `Navigator` anidado, y una
   // ruta ya construida no se reconstruye porque el shell haga `setState`.
-  final ValueNotifier<int> _tab = ValueNotifier<int>(0);
+  late final ValueNotifier<NavTabId> _tab;
   final GlobalKey<NavigatorState> _contentNav = GlobalKey<NavigatorState>();
   bool _panelOpen = false;
   bool _lyricsExpanded = false;
@@ -54,6 +53,8 @@ class _MainShellScreenState extends State<MainShellScreen>
   @override
   void initState() {
     super.initState();
+    // `LegalGate` no deja construir el shell hasta que cargan las preferencias.
+    _tab = ValueNotifier<NavTabId>(context.read<SettingsProvider>().initialTab);
     WidgetsBinding.instance.addObserver(this);
     // `MainShellScreen` es el único sitio del árbol con un BuildContext real
     // bajo MaterialApp que se construye una sola vez por proceso (main.dart
@@ -134,11 +135,12 @@ class _MainShellScreenState extends State<MainShellScreen>
     super.dispose();
   }
 
-  void _selectTab(int i) {
+  void _selectTab(NavTabId tab) {
     // En el escritorio, elegir una sección en la barra lateral también
     // vuelve a la raíz del contenido (si se estaba dentro de una playlist).
     _contentNav.currentState?.popUntil((route) => route.isFirst);
-    _tab.value = i;
+    _tab.value = tab;
+    context.read<SettingsProvider>().rememberLastTab(tab);
     setState(() {
       // Con la letra expandida (o en modo cine), el panel ocupa toda la fila
       // y tapa el navegador de contenido (ver _buildDesktopLayout) — sin
@@ -148,6 +150,12 @@ class _MainShellScreenState extends State<MainShellScreen>
       _cinemaMode = false;
     });
   }
+
+  int _badgeCount(NavTabId tab, int inboxCount, int downloadCount) => switch (tab) {
+        NavTabId.inbox => inboxCount,
+        NavTabId.add => downloadCount,
+        _ => 0,
+      };
 
   void _openPlaylist(String playlistId) {
     final nav = _contentNav.currentState;
@@ -242,7 +250,7 @@ class _MainShellScreenState extends State<MainShellScreen>
   /// Tres columnas: barra lateral de navegación + playlists a la izquierda,
   /// el contenido (con su propio `Navigator`, para que abrir una playlist no
   /// tape la barra lateral ni el panel) con la barra de reproducción debajo,
-  /// y a la derecha, cuando está abierto, el panel de "reproduciendo ahora"
+  /// y al lado elegido, cuando está abierto, el panel de "reproduciendo ahora"
   /// a un tercio de la ventana — ver W3 del plan de escritorio.
   Widget _buildDesktopLayout(
     BuildContext context,
@@ -272,9 +280,9 @@ class _MainShellScreenState extends State<MainShellScreen>
                 SizedBox(
                   width: spec.sidebarWidth,
                   child: _DesktopSidebar(
-                    selectedIndex: _tab.value,
-                    inboxCount: inboxCount,
-                    downloadCount: downloadCount,
+                    order: context.read<SettingsProvider>().navTabOrder,
+                    selected: _tab.value,
+                    badgeCount: (tab) => _badgeCount(tab, inboxCount, downloadCount),
                     onSelect: _selectTab,
                     onOpenPlaylist: _openPlaylist,
                   ),
@@ -297,31 +305,33 @@ class _MainShellScreenState extends State<MainShellScreen>
                     onToggleCinemaMode: () => _setCinemaMode(!_cinemaMode),
                   ),
                 )
-              else ...[
-                Expanded(
-                  child: Column(
-                    children: [
-                      Expanded(child: _buildContentNavigator()),
-                      DesktopPlaybackBar(
-                        panelOpen: _panelOpen,
-                        onTogglePanel: () => _setPanel(!_panelOpen),
-                      ),
-                    ],
-                  ),
-                ),
-                if (_panelOpen) ...[
-                  const VerticalDivider(width: 1, color: Colors.white12),
-                  SizedBox(
-                    width: spec.panelWidth,
-                    child: DesktopNowPlayingPanel(
-                      onClose: () => _setPanel(false),
-                      onOpenPlaylist: _openPlaylist,
-                      onPushContentRoute: _pushContentRoute,
-                      onToggleLyricsExpanded: () => _setLyricsExpanded(true),
+              else
+                ...arrangeDesktopColumns<Widget>(
+                  context.read<SettingsProvider>().desktopPanelSide,
+                  content: Expanded(
+                    child: Column(
+                      children: [
+                        Expanded(child: _buildContentNavigator()),
+                        DesktopPlaybackBar(
+                          panelOpen: _panelOpen,
+                          onTogglePanel: () => _setPanel(!_panelOpen),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ],
+                  divider: const VerticalDivider(width: 1, color: Colors.white12),
+                  panel: _panelOpen
+                      ? SizedBox(
+                          width: spec.panelWidth,
+                          child: DesktopNowPlayingPanel(
+                            onClose: () => _setPanel(false),
+                            onOpenPlaylist: _openPlaylist,
+                            onPushContentRoute: _pushContentRoute,
+                            onToggleLyricsExpanded: () => _setLyricsExpanded(true),
+                          ),
+                        )
+                      : null,
+                ),
             ],
           ),
         ),
@@ -342,9 +352,9 @@ class _MainShellScreenState extends State<MainShellScreen>
         }
         return MaterialPageRoute(
           settings: settings,
-          builder: (_) => ValueListenableBuilder<int>(
+          builder: (_) => ValueListenableBuilder<NavTabId>(
             valueListenable: _tab,
-            builder: (_, index, __) => _buildTabs(index),
+            builder: (_, tab, __) => _buildTabs(tab),
           ),
         );
       },
@@ -359,6 +369,10 @@ class _MainShellScreenState extends State<MainShellScreen>
     int downloadCount,
   ) {
     final l10n = AppLocalizations.of(context)!;
+    final order = context.read<SettingsProvider>().navTabOrder;
+    final navigationColor = context.select<SettingsProvider, Color?>(
+      (s) => s.areaColor(ColorArea.navigation),
+    );
     return Scaffold(
       body: Container(
         decoration: AppTheme.gradientScaffold(),
@@ -380,79 +394,44 @@ class _MainShellScreenState extends State<MainShellScreen>
           ),
         ),
       ),
-      bottomNavigationBar: MaxWidthCenter(
-        stretchHeight: false,
-        child: NavigationBar(
-          selectedIndex: _tab.value,
-          onDestinationSelected: _selectTab,
-          height: 68,
-          destinations: [
-            NavigationDestination(
-              icon: const Icon(Icons.library_music_outlined),
-              selectedIcon: const Icon(Icons.library_music_rounded),
-              label: l10n.homeTitle,
+      bottomNavigationBar: NavigationBarTheme(
+        data: navigationThemeWithOverride(
+          NavigationBarTheme.of(context),
+          navigationColor,
+        ),
+        child: MaxWidthCenter(
+          stretchHeight: false,
+          child: NavigationBar(
+            selectedIndex: navBarIndexOf(order, _tab.value),
+            onDestinationSelected: (index) => _selectTab(order[index]),
+            height: 68,
+            destinations: navBarDestinations(
+              l10n,
+              order,
+              badgeCount: (tab) => _badgeCount(tab, inboxCount, downloadCount),
             ),
-            NavigationDestination(
-              icon: Badge(
-                isLabelVisible: inboxCount > 0,
-                label: Text('$inboxCount'),
-                child: const Icon(Icons.inbox_outlined),
-              ),
-              selectedIcon: Badge(
-                isLabelVisible: inboxCount > 0,
-                label: Text('$inboxCount'),
-                child: const Icon(Icons.inbox_rounded),
-              ),
-              label: l10n.navInbox,
-            ),
-            NavigationDestination(
-              icon: Badge(
-                isLabelVisible: downloadCount > 0,
-                label: Text('$downloadCount'),
-                child: const Icon(Icons.cloud_download_outlined),
-              ),
-              selectedIcon: Badge(
-                isLabelVisible: downloadCount > 0,
-                label: Text('$downloadCount'),
-                child: const Icon(Icons.cloud_download_rounded),
-              ),
-              label: l10n.navAdd,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.explore_outlined),
-              selectedIcon: const Icon(Icons.explore_rounded),
-              label: l10n.exploreTitle,
-            ),
-            NavigationDestination(
-              icon: const Icon(Icons.settings_outlined),
-              selectedIcon: const Icon(Icons.settings_rounded),
-              label: l10n.settingsTitle,
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
 
-  /// Las cinco pantallas, compartidas por los dos diseños — un solo
+  /// Las pantallas, compartidas por los dos diseños — un solo
   /// `IndexedStack` para que cambiar de sección (o de diseño al
   /// redimensionar la ventana) no pierda el estado de ninguna.
-  Widget _buildTabs(int index) {
-    return ServerCapacityGate(child: _buildTabStack(index));
-  }
-
-  Widget _buildTabStack(int index) {
-    return IndexedStack(
-      index: index,
-      // ImportScreen ya no es const (Fase 8: toma un SpotifyService
-      // inyectable para tests), así que la lista entera deja de serlo.
-      children: [
-        const HomeScreen(),
-        const InboxScreen(),
-        ImportScreen(),
-        ExploreScreen(active: index == _exploreTab),
-        const SettingsScreen(),
-      ],
+  Widget _buildTabs(NavTabId current) {
+    return ServerCapacityGate(
+      child: NavTabStack(
+        current: current,
+        builder: (tab) => switch (tab) {
+          NavTabId.home => const HomeScreen(),
+          NavTabId.inbox => const InboxScreen(),
+          // No es const (Fase 8: toma un SpotifyService inyectable para tests).
+          NavTabId.add => ImportScreen(),
+          NavTabId.explore => ExploreScreen(active: current == NavTabId.explore),
+          NavTabId.settings => const SettingsScreen(),
+        },
+      ),
     );
   }
 }
@@ -461,16 +440,16 @@ class _MainShellScreenState extends State<MainShellScreen>
 /// barra inferior del teléfono, en vertical, más la lista de playlists
 /// siempre a mano (lo que en el teléfono exige entrar a Inicio primero).
 class _DesktopSidebar extends StatelessWidget {
-  final int selectedIndex;
-  final int inboxCount;
-  final int downloadCount;
-  final ValueChanged<int> onSelect;
+  final List<NavTabId> order;
+  final NavTabId selected;
+  final int Function(NavTabId tab) badgeCount;
+  final ValueChanged<NavTabId> onSelect;
   final ValueChanged<String> onOpenPlaylist;
 
   const _DesktopSidebar({
-    required this.selectedIndex,
-    required this.inboxCount,
-    required this.downloadCount,
+    required this.order,
+    required this.selected,
+    required this.badgeCount,
     required this.onSelect,
     required this.onOpenPlaylist,
   });
@@ -505,43 +484,15 @@ class _DesktopSidebar extends StatelessWidget {
             ],
           ),
         ),
-        _SidebarItem(
-          icon: Icons.library_music_outlined,
-          selectedIcon: Icons.library_music_rounded,
-          label: l10n.homeTitle,
-          selected: selectedIndex == 0,
-          onTap: () => onSelect(0),
-        ),
-        _SidebarItem(
-          icon: Icons.inbox_outlined,
-          selectedIcon: Icons.inbox_rounded,
-          label: l10n.navInbox,
-          badgeCount: inboxCount,
-          selected: selectedIndex == 1,
-          onTap: () => onSelect(1),
-        ),
-        _SidebarItem(
-          icon: Icons.cloud_download_outlined,
-          selectedIcon: Icons.cloud_download_rounded,
-          label: l10n.navAdd,
-          badgeCount: downloadCount,
-          selected: selectedIndex == 2,
-          onTap: () => onSelect(2),
-        ),
-        _SidebarItem(
-          icon: Icons.explore_outlined,
-          selectedIcon: Icons.explore_rounded,
-          label: l10n.exploreTitle,
-          selected: selectedIndex == _exploreTab,
-          onTap: () => onSelect(_exploreTab),
-        ),
-        _SidebarItem(
-          icon: Icons.settings_outlined,
-          selectedIcon: Icons.settings_rounded,
-          label: l10n.settingsTitle,
-          selected: selectedIndex == 4,
-          onTap: () => onSelect(4),
-        ),
+        for (final tab in order)
+          _SidebarItem(
+            icon: navTabDef(tab).icon,
+            selectedIcon: navTabDef(tab).selectedIcon,
+            label: navTabDef(tab).label(l10n),
+            badgeCount: badgeCount(tab),
+            selected: selected == tab,
+            onTap: () => onSelect(tab),
+          ),
         const Divider(
           height: 28,
           indent: 20,
@@ -624,7 +575,12 @@ class _SidebarItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = selected
-        ? AppTheme.primaryLight
+        ? resolveAreaColor(
+            context.select<SettingsProvider, Color?>(
+              (s) => s.areaColor(ColorArea.navigation),
+            ),
+            AppTheme.primaryLight,
+          )
         : Colors.white.withValues(alpha: 0.75);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),

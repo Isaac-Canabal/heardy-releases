@@ -19,17 +19,33 @@ import 'explore_collection_screen.dart';
 class ExploreArtistScreen extends StatefulWidget {
   final String name;
   final String thumbnailUrl;
+
+  /// Identifica al artista para seguirlo: el perfil del servidor no lo repite.
+  /// Vacío oculta el botón de seguir.
+  final String channelId;
   final Future<ExploreArtist> Function() loader;
 
-  const ExploreArtistScreen({super.key, required this.name, required this.loader, this.thumbnailUrl = ''});
+  const ExploreArtistScreen({
+    super.key,
+    required this.name,
+    required this.channelId,
+    required this.loader,
+    this.thumbnailUrl = '',
+  });
 
   static Route<void> route({
     required String name,
+    required String channelId,
     required Future<ExploreArtist> Function() loader,
     String thumbnailUrl = '',
   }) =>
       MaterialPageRoute<void>(
-        builder: (_) => ExploreArtistScreen(name: name, thumbnailUrl: thumbnailUrl, loader: loader),
+        builder: (_) => ExploreArtistScreen(
+          name: name,
+          channelId: channelId,
+          thumbnailUrl: thumbnailUrl,
+          loader: loader,
+        ),
       );
 
   @override
@@ -97,6 +113,7 @@ class _ExploreArtistScreenState extends State<ExploreArtistScreen>
     final source = context.read<DownloadSource>();
     Navigator.of(context).push(ExploreArtistScreen.route(
       name: r.name,
+      channelId: r.channelId,
       thumbnailUrl: r.thumbnailUrl,
       loader: () => source.exploreArtist(r.channelId),
     ));
@@ -161,6 +178,10 @@ class _ExploreArtistScreenState extends State<ExploreArtistScreen>
               l10n.exploreArtistSubscribers(subscribers),
               style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 14),
             ),
+          ],
+          if (widget.channelId.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            FollowArtistButton(channelId: widget.channelId, name: name, thumbnailUrl: cover),
           ],
           if (description.isNotEmpty) ...[
             const SizedBox(height: 14),

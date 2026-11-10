@@ -67,6 +67,7 @@ Future<void> openArtistProfile(
   final found = hit;
   final route = ExploreArtistScreen.route(
     name: found.name,
+    channelId: found.channelId,
     thumbnailUrl: found.thumbnailUrl,
     loader: () => source.exploreArtist(found.channelId),
   );

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Los iconos de la notificación se buscan por nombre en tiempo de ejecución
+     (audio_service usa getIdentifier): sin esto, shrinkResources los borra. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_repeat_off,@drawable/ic_repeat_all,@drawable/ic_repeat_one,@drawable/audio_service_*" />

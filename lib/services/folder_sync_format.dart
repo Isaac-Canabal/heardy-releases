@@ -8,8 +8,12 @@ import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 
+import 'followed_artists_merge.dart' show parseFollowedArtistDate;
+
 /// 2 suma playlists online, pistas remotas e historial de streaming. Un
-/// archivo schema 2 lo omite una app que solo entienda schema 1.
+/// archivo schema 2 lo omite una app que solo entienda schema 1. Los arreglos
+/// opcionales que se suman después (`followedArtists`) no suben el número: una
+/// app que no los conoce los ignora, y con schema 3 saltaría el archivo entero.
 const folderSyncSchema = 2;
 const folderSyncMinSchema = 1;
 const folderSyncMaxFileBytes = 50 * 1024 * 1024;
@@ -45,6 +49,22 @@ const _historyColumns = ['fileHash', 'playedAtLocal', 'playedAtUtc', 'playSecond
 const _remoteTrackColumns = ['videoId', 'title', 'artist', 'album', 'durationSeconds', 'thumbnailUrl', 'sourceUrl'];
 const _playlistRemoteTrackColumns = ['playlistId', 'videoId', 'orderIndex'];
 const _remoteHistoryColumns = ['videoId', 'playedAtLocal', 'playedAtUtc', 'playSeconds'];
+const _followedArtistColumns = ['channelId', 'name', 'thumbnailUrl', 'followedAt', 'unfollowedAt'];
+
+/// `isMix` solo viaja en los mixes guardados (valor 1): una canción corriente
+/// queda como en el formato anterior. Un valor que no sea 0 se conserva tal cual
+/// para que [_validate] invalide el archivo si no es exactamente 1.
+List<Map<String, dynamic>> _projectSongs(Object? rows) {
+  final projected = _projectAll(rows, _songColumns, 'songs');
+  final raw = rows as List?;
+  return [
+    for (var i = 0; i < projected.length; i++)
+      {
+        ...projected[i],
+        if ((raw![i] as Map)['isMix'] != null && (raw[i] as Map)['isMix'] != 0) 'isMix': (raw[i] as Map)['isMix'],
+      },
+  ];
+}
 
 /// `kind` solo viaja en las online: una playlist local queda como en schema 1.
 List<Map<String, dynamic>> _projectPlaylists(Object? rows) => [
@@ -83,6 +103,9 @@ class FolderSyncSnapshot {
   final List<Map<String, dynamic>> playlistRemoteTracks;
   final List<Map<String, dynamic>> remoteHistory;
 
+  /// Incluye las marcas de baja (`unfollowedAt`), para propagarlas.
+  final List<Map<String, dynamic>> followedArtists;
+
   FolderSyncSnapshot({
     required this.deviceId,
     required this.deviceLabel,
@@ -94,14 +117,16 @@ class FolderSyncSnapshot {
     List<Map<String, dynamic>> remoteTracks = const [],
     List<Map<String, dynamic>> playlistRemoteTracks = const [],
     List<Map<String, dynamic>> remoteHistory = const [],
-  })  : songs = _projectAll(songs, _songColumns, 'songs'),
+    List<Map<String, dynamic>> followedArtists = const [],
+  })  : songs = _projectSongs(songs),
         playlists = _projectPlaylists(playlists),
         playlistSongs = _projectAll(playlistSongs, _playlistSongColumns, 'playlistSongs'),
         history = _projectAll(history, _historyColumns, 'history'),
         remoteTracks = _projectAll(remoteTracks, _remoteTrackColumns, 'remoteTracks'),
         playlistRemoteTracks =
             _projectAll(playlistRemoteTracks, _playlistRemoteTrackColumns, 'playlistRemoteTracks'),
-        remoteHistory = _projectAll(remoteHistory, _remoteHistoryColumns, 'remoteHistory');
+        remoteHistory = _projectAll(remoteHistory, _remoteHistoryColumns, 'remoteHistory'),
+        followedArtists = _projectAll(followedArtists, _followedArtistColumns, 'followedArtists');
 
   Map<String, dynamic> toJson() => {
         'schema': folderSyncSchema,
@@ -115,6 +140,7 @@ class FolderSyncSnapshot {
         'remoteTracks': remoteTracks,
         'playlistRemoteTracks': playlistRemoteTracks,
         'remoteHistory': remoteHistory,
+        'followedArtists': followedArtists,
       };
 
   factory FolderSyncSnapshot.fromJson(Map<String, dynamic> json) {
@@ -137,6 +163,7 @@ class FolderSyncSnapshot {
       remoteTracks: _asRows(json['remoteTracks'], 'remoteTracks'),
       playlistRemoteTracks: _asRows(json['playlistRemoteTracks'], 'playlistRemoteTracks'),
       remoteHistory: _asRows(json['remoteHistory'], 'remoteHistory'),
+      followedArtists: _asRows(json['followedArtists'], 'followedArtists'),
     );
   }
 }
@@ -182,6 +209,7 @@ const _maxUrlChars = 2048;
 const _maxSeconds = 10000000;
 const _maxOrder = 10000000;
 final _videoIdPattern = RegExp(r'^[A-Za-z0-9_-]{11}$');
+final _channelIdPattern = RegExp(r'^[A-Za-z0-9_-]+$');
 
 FolderSyncFormatException _bad(String field, String why) =>
     FolderSyncFormatException(FolderSyncErrorKind.malformed, '"$field": $why');
@@ -209,6 +237,7 @@ void _validate(Map<String, dynamic> json, FolderSyncSnapshot s) {
     'remoteTracks': s.remoteTracks,
     'playlistRemoteTracks': s.playlistRemoteTracks,
     'remoteHistory': s.remoteHistory,
+    'followedArtists': s.followedArtists,
   };
   for (final e in arrays.entries) {
     if (e.value.length > folderSyncMaxRowsPerArray) throw _bad(e.key, 'demasiadas filas');
@@ -223,6 +252,8 @@ void _validate(Map<String, dynamic> json, FolderSyncSnapshot s) {
     _text(r, 'hashKind', 'songs', 32);
     _number(r, 'durationSeconds', 'songs', _maxSeconds);
     _httpsOnly(r, 'sourceUrl', 'songs');
+    final isMix = r['isMix'];
+    if (isMix != null && !(isMix is int && isMix == 1)) throw _bad('songs', 'isMix inválido');
   }
   for (final r in s.playlists) {
     _text(r, 'playlistId', 'playlists', _maxIdChars, required: true);
@@ -263,6 +294,16 @@ void _validate(Map<String, dynamic> json, FolderSyncSnapshot s) {
     _text(r, 'playedAtUtc', 'remoteHistory', _maxStampChars);
     _number(r, 'playSeconds', 'remoteHistory', _maxSeconds);
   }
+  for (final r in s.followedArtists) {
+    _text(r, 'channelId', 'followedArtists', _maxIdChars, required: true);
+    if (!_channelIdPattern.hasMatch(r['channelId'] as String)) throw _bad('followedArtists', 'channelId inválido');
+    // Puede venir vacío, pero la columna no admite NULL.
+    if (r['name'] is! String) throw _bad('followedArtists', 'falta name');
+    _text(r, 'name', 'followedArtists', _maxTextChars);
+    _httpsOnly(r, 'thumbnailUrl', 'followedArtists');
+    _instant(r, 'followedAt', 'followedArtists', required: true);
+    _instant(r, 'unfollowedAt', 'followedArtists');
+  }
 }
 
 void _text(Map<String, dynamic> row, String key, String field, int max, {bool required = false}) {
@@ -285,6 +326,12 @@ void _number(Map<String, dynamic> row, String key, String field, int max) {
 void _videoId(Map<String, dynamic> row, String field) {
   final v = row['videoId'];
   if (v is! String || !_videoIdPattern.hasMatch(v)) throw _bad(field, 'videoId inválido');
+}
+
+void _instant(Map<String, dynamic> row, String key, String field, {bool required = false}) {
+  _text(row, key, field, _maxStampChars, required: required);
+  final v = row[key];
+  if (v != null && parseFollowedArtistDate(v) == null) throw _bad(field, '$key no es una fecha');
 }
 
 void _httpsOnly(Map<String, dynamic> row, String key, String field) {
@@ -311,6 +358,7 @@ String snapshotContentHash(FolderSyncSnapshot s) {
     if (s.remoteTracks.isNotEmpty) 'rt': sorted(s.remoteTracks, _remoteTrackColumns),
     if (s.playlistRemoteTracks.isNotEmpty) 'prt': sorted(s.playlistRemoteTracks, _playlistRemoteTrackColumns),
     if (s.remoteHistory.isNotEmpty) 'rh': sorted(s.remoteHistory, _remoteHistoryColumns),
+    if (s.followedArtists.isNotEmpty) 'fa': sorted(s.followedArtists, _followedArtistColumns),
   }));
   return md5.convert(bytes).toString();
 }

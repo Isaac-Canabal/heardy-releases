@@ -307,11 +307,21 @@ class HeardyCloudSource implements CloudSource {
     required List<Map<String, dynamic>> playlistSongs,
     List<Map<String, dynamic>> remoteTracks = const [],
     List<Map<String, dynamic>> playlistRemoteTracks = const [],
+    List<Map<String, dynamic>> followedArtists = const [],
+    void Function()? onFollowedArtistsSkipped,
   }) async {
-    Map<String, dynamic> body(bool withOnline) => {
+    final hasFollows = followedArtists.isNotEmpty;
+    final hasMix = songs.any((s) => s['isMix'] != null);
+    Map<String, dynamic> body({required bool withFollows, required bool withOnline, required bool withMix}) => {
           'baseVersion': baseVersion,
-          if (contentHash != null) 'contentHash': contentHash,
-          'songs': songs,
+          // Sin los seguidos el hash ya no describe lo subido: enviado igual, el
+          // servidor tomaría por "nada cambió" el push que por fin los incluya.
+          if (contentHash != null && withFollows == hasFollows && withMix == hasMix) 'contentHash': contentHash,
+          'songs': withMix
+              ? songs
+              : [
+                  for (final s in songs) {...s}..remove('isMix'),
+                ],
           'playlists': withOnline
               ? playlists
               : [
@@ -321,24 +331,51 @@ class HeardyCloudSource implements CloudSource {
           'playlistSongs': playlistSongs,
           if (withOnline && remoteTracks.isNotEmpty) 'remoteTracks': remoteTracks,
           if (withOnline && playlistRemoteTracks.isNotEmpty) 'playlistRemoteTracks': playlistRemoteTracks,
+          if (withFollows) 'followedArtists': followedArtists,
         };
 
     final hasOnline = playlists.any((p) => p['kind'] == 'online') ||
         remoteTracks.isNotEmpty ||
         playlistRemoteTracks.isNotEmpty;
-    Map<String, dynamic> json;
-    try {
-      json = await _send('PUT', '/library', body(true), timeout: _libraryTimeout);
-    } on CloudSourceException catch (e) {
-      // Un servidor sin migrar rechaza con 422 los campos que no conoce
-      // (`extra="forbid"`). Se reintenta una vez sin la parte online: el
-      // respaldo de lo local sigue funcionando, y las playlists online
-      // esperan a que el servidor se actualice.
-      if (!hasOnline || e.statusCode != 422) rethrow;
-      appLog('HeardyCloudSource: el servidor no acepta playlists online, se sube sólo lo local');
-      json = await _send('PUT', '/library', body(false), timeout: _libraryTimeout);
+    // Un servidor sin migrar rechaza con 422 los campos que no conoce
+    // (`extra="forbid"`). Se quita primero lo más nuevo, los seguidos, para que
+    // uno al que sólo le falta eso conserve las playlists online; luego la
+    // parte online, y el respaldo de lo local sigue funcionando. Lo más nuevo de
+    // todo es la marca `isMix` de las canciones: se quita la primera, y un
+    // servidor al que sólo le falta eso conserva todo lo demás. Cada 422 quita
+    // algo, así que son cuatro intentos como mucho.
+    var withMix = hasMix;
+    var withFollows = hasFollows;
+    var withOnline = true;
+    while (true) {
+      final Map<String, dynamic> json;
+      try {
+        json = await _send(
+          'PUT',
+          '/library',
+          body(withFollows: withFollows, withOnline: withOnline, withMix: withMix),
+          timeout: _libraryTimeout,
+        );
+      } on CloudSourceException catch (e) {
+        if (e.statusCode != 422) rethrow;
+        if (withMix) {
+          withMix = false;
+          appLog('HeardyCloudSource: el servidor no acepta la marca de mix, se suben como canciones normales');
+          continue;
+        }
+        if (withFollows) {
+          withFollows = false;
+          appLog('HeardyCloudSource: el servidor no acepta artistas seguidos, se suben después');
+          continue;
+        }
+        if (!withOnline || !hasOnline) rethrow;
+        withOnline = false;
+        appLog('HeardyCloudSource: el servidor no acepta playlists online, se sube sólo lo local');
+        continue;
+      }
+      if (hasFollows && !withFollows) onFollowedArtistsSkipped?.call();
+      return (json['version'] as num?)?.toInt() ?? baseVersion;
     }
-    return (json['version'] as num?)?.toInt() ?? baseVersion;
   }
 
   @override

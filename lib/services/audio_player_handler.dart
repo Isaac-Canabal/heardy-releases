@@ -16,6 +16,7 @@ import 'playback_state_service.dart';
 import 'app_log.dart';
 import 'download_source.dart';
 import 'fade_logic.dart';
+import 'media_controls.dart';
 import 'online_playlist_logic.dart' show shouldRecordRemotePlay;
 import 'playback_speed_logic.dart';
 import 'repeat_count_logic.dart';
@@ -922,12 +923,10 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   /// Builds a PlaybackState from a PlaybackEvent, reading the current player properties.
   PlaybackState _buildPlaybackState(PlaybackEvent event) {
     return PlaybackState(
-      controls: [
-        MediaControl.skipToPrevious,
-        if (_player.playing) MediaControl.pause else MediaControl.play,
-        MediaControl.stop,
-        MediaControl.skipToNext,
-      ],
+      controls: notificationControls(
+        playing: _player.playing,
+        repeat: _currentRepeatMode,
+      ),
       systemActions: const {
         MediaAction.seek,
         MediaAction.seekForward,
@@ -935,7 +934,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         MediaAction.setShuffleMode,
         MediaAction.setRepeatMode,
       },
-      androidCompactActionIndices: const [0, 1, 3],
+      androidCompactActionIndices: kNotificationCompactIndices,
       processingState: _streamTracks != null && !_streamReady
           ? AudioProcessingState.loading
           : const {
@@ -1193,6 +1192,21 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  AudioServiceRepeatMode get _currentRepeatMode => switch (_player.loopMode) {
+        LoopMode.one => AudioServiceRepeatMode.one,
+        LoopMode.all => AudioServiceRepeatMode.all,
+        LoopMode.off => AudioServiceRepeatMode.none,
+      };
+
+  /// Botón de repetir de la notificación (Android).
+  @override
+  Future<dynamic> customAction(String name, [Map<String, dynamic>? extras]) async {
+    if (name == kToggleRepeatAction) {
+      return setRepeatMode(nextRepeatMode(_currentRepeatMode, allowAll: _streamTracks == null));
+    }
+    return super.customAction(name, extras);
+  }
+
   @override
   Future<void> setRepeatMode(AudioServiceRepeatMode repeatMode) async {
     await cancelRepeatCount(restoreMode: false);
@@ -1387,6 +1401,35 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     } catch (e) {
       // Sólo el tipo: el texto de un error de carga puede citar la URL firmada.
       appLog('Error reproduciendo el stream de ${track.id} (${e.runtimeType})');
+      rethrow;
+    }
+  }
+
+  /// Reproduce un archivo privado de la app que no es una canción de la
+  /// biblioteca (un mix de Heardy Mixer) igual que un stream suelto: cola de
+  /// uno, sin fila en `songs`, sin `play_history`, sin `stream_history` y sin
+  /// restaurar. [item] debe llevar `isStream: true` en `extras`.
+  Future<void> playEphemeralFile(MediaItem item, String path) async {
+    assert(_isStreamItem(item));
+    try {
+      _cancelStreamQueue();
+      _streamReady = false;
+      _streamErrorReportedFor = null;
+      await _finalizePlay();
+      _resetTracking();
+      _repeatCounter.cancel();
+      repeatRemaining.value = 0;
+      if (_player.loopMode != LoopMode.off) {
+        await _player.setLoopMode(LoopMode.off);
+      }
+      _unshuffledQueue = null;
+      queue.add([item]);
+      _playlistSource = ConcatenatingAudioSource(children: [AudioSource.file(path, tag: item)]);
+      await _player.setAudioSource(_playlistSource!, initialIndex: 0, initialPosition: Duration.zero);
+      mediaItem.add(item);
+      _player.play().catchError((Object _) {});
+    } catch (e) {
+      appLog('Error reproduciendo un archivo efímero (${e.runtimeType})');
       rethrow;
     }
   }

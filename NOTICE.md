@@ -43,6 +43,20 @@ third-party components. This list is not exhaustive for transitive dependencies.
 - **RxJava / RxAndroid** (ReactiveX), Apache-2.0.
 - **AndroidX WebKit / Annotation**, Apache-2.0.
 
+## Mix DJ (on-device stem separation)
+
+- **sherpa-onnx** (https://github.com/k2-fsa/sherpa-onnx), release v2.0.1, Apache-2.0. Its C API library is downloaded
+  at build time from the official release and pinned by SHA-256 (`android/app/build.gradle` for Android arm64-v8a,
+  `windows/CMakeLists.txt` for Windows x64), and called through `dart:ffi`.
+- **ONNX Runtime** (https://github.com/microsoft/onnxruntime), Copyright (c) Microsoft Corporation, MIT. The build
+  bundled inside the same sherpa-onnx release packages.
+- **Spleeter** (https://github.com/deezer/spleeter), Copyright (c) 2019-present, Deezer SA, MIT: the 2-stem model,
+  as converted to ONNX by sherpa-onnx. Not shipped in the app; downloaded only when the user asks, from the official
+  sherpa-onnx release, and verified by SHA-256.
+- **Ultimate Vocal Remover (UVR)** MDX-Net models `UVR_MDXNET_9482` and `UVR-MDX-NET-Voc_FT`
+  (https://github.com/Anjok07/ultimatevocalremovergui), MIT. Credit to UVR and its developers, as their README asks.
+  MDX-Net architecture by Kuielab and Woosung Choi. Downloaded only on request, like Spleeter.
+
 ## Dart / Flutter dependencies
 
 All other Dart and Flutter packages are used under their own licenses (BSD-3-Clause, MIT, Apache-2.0, ...). The exact
@@ -59,3 +73,8 @@ Lyrics are fetched from LRCLIB (https://lrclib.net/).
 
 The name "Heardy" and the logo/icon artwork (`Heardy_icon.png` and the branding files under `assets/`) are NOT licensed
 for use under the GPL. Forks should use their own name and icon.
+
+## Bundled fonts
+
+Nunito (The Nunito Project Authors), Lora (The Lora Project Authors) and IBM Plex Mono (IBM Corp.), SIL Open Font
+License 1.1; each license is shipped in `assets/fonts/<family>/OFL.txt`.

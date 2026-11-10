@@ -16,18 +16,25 @@ import '../screens/lan_sync_screen.dart';
 import '../screens/legal_screen.dart';
 import '../screens/sync_status_screen.dart';
 import '../screens/cloud_library_screen.dart';
+import '../screens/ignored_recommendations_screen.dart';
 import '../screens/equalizer_screen.dart';
 import '../services/audio_effects_service.dart';
 import '../services/audio_player_handler.dart';
 import '../services/database_helper.dart';
 import '../services/library_storage.dart' show LibraryEntry;
 import '../theme/app_theme.dart';
+import '../theme/nav_tabs.dart';
 import '../services/storage_service.dart';
 import '../l10n/app_localizations.dart';
 import '../widgets/max_width_center.dart';
+import '../widgets/reorder_sheet.dart';
+import '../models/nav_tab.dart';
 import '../models/statistics_data.dart';
 import '../services/share_image_service.dart';
 import '../services/statistics_service.dart';
+import '../widgets/area_colors_sheet.dart';
+import '../widgets/now_playing_layout_sheet.dart';
+import '../widgets/text_style_sheet.dart';
 import '../widgets/color_picker_panel.dart';
 import '../widgets/share_stats_card.dart';
 import '../widgets/statistics_view.dart';
@@ -35,589 +42,47 @@ import '../widgets/username_claim_sheet.dart';
 import '../services/friendly_error.dart';
 import '../services/app_log.dart';
 
+part 'settings_sections.dart';
+
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
-  /// El audio real de las canciones importadas o descargadas vive en la
-  /// carpeta SAF que eligió el usuario, no en un `File` que `dart:io` pueda
-  /// leer (D1) — antes esto sólo sumaba `File(song.filePath)`, que para esas
-  /// canciones está vacío, así que el número mostrado ignoraba casi todo lo
-  /// que realmente ocupa espacio. Se suma aparte: el tamaño real de la
-  /// carpeta (vía SAF) más lo que sigue siendo legítimamente un `File` —
-  /// descargas heredadas pre-pivot y las miniaturas, que siempre viven en
-  /// almacenamiento privado sin importar el origen de la canción (D5).
-  Future<String> _calculateStorageUsage(BuildContext context, String? libraryRootUri) async {
-    try {
-      int totalBytes = 0;
-
-      if (libraryRootUri != null) {
-        totalBytes += await StorageService().calculateLibrarySize(libraryRootUri);
-      }
-
-      final songs = await DatabaseHelper.instance.getSongs();
-      for (final song in songs) {
-        if (song.uri == null || song.uri!.isEmpty) {
-          try {
-            final audioFile = File(song.filePath);
-            if (await audioFile.exists()) {
-              totalBytes += await audioFile.length();
-            }
-          } catch (_) {}
-        }
-
-        try {
-          if (song.artPath.isNotEmpty) {
-            final artFile = File(song.artPath);
-            if (await artFile.exists()) {
-              totalBytes += await artFile.length();
-            }
-          }
-        } catch (_) {}
-      }
-
-      return _formatBytes(totalBytes);
-    } catch (e) {
-      return context.mounted ? AppLocalizations.of(context)!.settingsCalcError : 'Error calculando';
-    }
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024)
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-  }
-
-  Future<void> _pickLibraryFolder(BuildContext context) async {
-    final storageService = StorageService();
-    try {
-      final rootUri = await storageService.pickLibraryRoot();
-      if (!context.mounted) return;
-      if (rootUri == null) return; // user cancelled the picker
-      // Notify MusicProvider immediately so Bandeja (kept alive by the
-      // bottom nav's IndexedStack) reflects the pick without the user
-      // having to navigate away and back.
-      context.read<MusicProvider>().setLibraryRootUri(rootUri);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context)!.settingsFolderReadySnack),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(AppLocalizations.of(context)!.settingsFolderPickError(
-              localizedErrorReport(AppLocalizations.of(context)!, e, area: 'FS'),
-            )),
-          backgroundColor: Colors.red.withValues(alpha: 0.8),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final settings = Provider.of<SettingsProvider>(context);
-    final musicProvider = Provider.of<MusicProvider>(context);
+    final settings = context.watch<SettingsProvider>();
     final l10n = AppLocalizations.of(context)!;
 
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(kScreenGutter, 16, kScreenGutter, 90),
         children: [
-          Text(
-            l10n.settingsTitle,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-            ),
+          // `Wrap`: con texto grande la acción baja de línea en vez de desbordar.
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            children: [
+              Text(
+                l10n.settingsTitle,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              TextButton.icon(
+                key: const Key('settings_reorder_sections'),
+                style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                icon: const Icon(Icons.swap_vert_rounded, size: 18),
+                label: Text(l10n.settingsReorderSections),
+                onPressed: () => _showSectionOrderSheet(context),
+              ),
+            ],
           ),
-          const SizedBox(height: 24),
-          _SectionTitle(l10n.settingsAccountSectionTitle),
-          const SizedBox(height: 10),
-          const _AccountSection(),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.folderSyncSectionTitle),
-          const SizedBox(height: 10),
-          const _FolderSyncSection(),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.lanSyncSectionTitle),
-          const SizedBox(height: 10),
-          const LanSyncSettingsSection(),
-          const SizedBox(height: 28),
-          const _StatisticsSection(),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionStorage),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            padding: const EdgeInsets.all(16),
-            child: FutureBuilder<String>(
-              key: ValueKey(musicProvider.libraryRootUri),
-              future: _calculateStorageUsage(context, musicProvider.libraryRootUri),
-              builder: (context, snapshot) {
-                final storage = snapshot.data ?? l10n.settingsCalculating;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.storage_rounded,
-                          color: AppTheme.primaryLight,
-                          size: 20,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          l10n.settingsSpaceUsed,
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.7),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      storage,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      l10n.settingsTotalDownloadedSongs,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionAppearance),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l10n.settingsThemeColor,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.7),
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...AppThemePreset.values.map((preset) {
-                  final selected = settings.preset == preset;
-                  final isCustom = preset == AppThemePreset.custom;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Material(
-                      color: selected
-                          ? AppTheme.primary.withValues(alpha: 0.2)
-                          : Colors.white.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(12),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => isCustom
-                            ? _showCustomThemeSheet(context, settings)
-                            : settings.setPreset(preset),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                            children: [
-                              _PresetDot(preset: preset),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  settings.presetLabel(context, preset),
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: selected
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                              if (isCustom)
-                                Icon(
-                                  Icons.tune_rounded,
-                                  color: selected
-                                      ? AppTheme.primaryLight
-                                      : Colors.white.withValues(alpha: 0.4),
-                                  size: 20,
-                                )
-                              else if (selected)
-                                Icon(
-                                  Icons.check_circle_rounded,
-                                  color: AppTheme.primaryLight,
-                                  size: 20,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-                const Divider(height: 24, color: Colors.white12),
-                SwitchListTile(
-                  key: const Key('dynamic_now_playing_color_switch'),
-                  contentPadding: EdgeInsets.zero,
-                  activeThumbColor: AppTheme.primaryLight,
-                  value: settings.dynamicNowPlayingColor,
-                  title: Text(
-                    l10n.settingsDynamicNowPlayingColor,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                  ),
-                  subtitle: Text(
-                    l10n.settingsDynamicNowPlayingColorBody,
-                    style: TextStyle(color: Colors.white.withValues(alpha: 0.45), fontSize: 11),
-                  ),
-                  onChanged: settings.setDynamicNowPlayingColor,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionLanguage),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ...AppLanguage.values.map((lang) {
-                  final selected = settings.language == lang;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Material(
-                      color: selected
-                          ? AppTheme.primary.withValues(alpha: 0.2)
-                          : Colors.white.withValues(alpha: 0.04),
-                      borderRadius: BorderRadius.circular(12),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: () => settings.setLanguage(lang),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.language_rounded,
-                                color: selected ? AppTheme.primaryLight : Colors.white54,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  settings.languageLabel(lang),
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                              if (selected)
-                                Icon(
-                                  Icons.check_circle_rounded,
-                                  color: AppTheme.primaryLight,
-                                  size: 20,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  );
-                }),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionPlaylistOrder),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            child: musicProvider.playlists.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Text(
-                      l10n.settingsCreatePlaylistsHint,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                      ),
-                    ),
-                  )
-                : ReorderableListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    buildDefaultDragHandles: false,
-                    itemCount: musicProvider.playlists.length,
-                    onReorder: (oldIndex, newIndex) async {
-                      if (newIndex > oldIndex) newIndex--;
-                      final list = [...musicProvider.playlists];
-                      final item = list.removeAt(oldIndex);
-                      list.insert(newIndex, item);
-                      await musicProvider.reorderPlaylists(list);
-                    },
-                    itemBuilder: (context, index) {
-                      final p = musicProvider.playlists[index];
-                      return ListTile(
-                        key: ValueKey(p.id),
-                        leading: ReorderableDragStartListener(
-                          index: index,
-                          child: Icon(
-                            Icons.drag_handle_rounded,
-                            color: Colors.white.withValues(alpha: 0.4),
-                          ),
-                        ),
-                        title: Text(
-                          p.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        trailing: Text(
-                          '#${index + 1}',
-                          style: TextStyle(
-                            color: Colors.white.withValues(alpha: 0.35),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionLocalLibrary),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.folder_open_rounded,
-                      color: AppTheme.primaryLight,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      l10n.settingsImportFromFolder,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  l10n.settingsImportFolderBody,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.45),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: BorderSide(
-                        color: Colors.white.withValues(alpha: 0.3),
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    icon: const Icon(Icons.folder_rounded, size: 18),
-                    label: Text(
-                      l10n.settingsChooseFolder,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    onPressed: () => _pickLibraryFolder(context),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionAudio),
-          const SizedBox(height: 10),
-          const _AudioEffectsSection(),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionSearch),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Icon(
-                      Icons.search_rounded,
-                      color: AppTheme.primaryLight,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      l10n.settingsMaxResults,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        fontSize: 13,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  l10n.settingsMaxResultsBody,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.45),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.remove, size: 20),
-                      color: AppTheme.primaryLight,
-                      onPressed: settings.maxSearchResults > 10
-                          ? () => settings.setMaxSearchResults(
-                              settings.maxSearchResults - 10,
-                            )
-                          : null,
-                    ),
-                    Expanded(
-                      child: Text(
-                        '${settings.maxSearchResults}',
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.add, size: 20),
-                      color: AppTheme.primaryLight,
-                      onPressed: settings.maxSearchResults < 200
-                          ? () => settings.setMaxSearchResults(
-                              settings.maxSearchResults + 10,
-                            )
-                          : null,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.supportSectionTitle),
-          const SizedBox(height: 10),
-          const _SupportCard(),
-          const SizedBox(height: 28),
-          _SectionTitle(l10n.settingsSectionAbout),
-          const SizedBox(height: 10),
-          Container(
-            decoration: AppTheme.glassCard(),
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Heardy',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  l10n.settingsAboutBody,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.45),
-                    fontSize: 13,
-                    height: 1.4,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const _AppVersionLabel(),
-                const SizedBox(height: 10),
-                Text(
-                  l10n.settingsAboutExternalServices,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.35),
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                ),
-                if (Platform.isWindows) ...[
-                  const SizedBox(height: 10),
-                  Text(
-                    l10n.settingsAboutThirdParty,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.35),
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                    ),
-                    icon: const Icon(Icons.gavel_rounded, size: 18),
-                    label: Text(l10n.legalTitle, style: const TextStyle(fontWeight: FontWeight.w600)),
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const LegalScreen()),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          // La acción mide 48 y el título 40: las secciones quedan donde siempre.
+          const SizedBox(height: 16),
+          for (final (index, id) in settings.settingsSectionOrder.indexed) ...[
+            if (index > 0) const SizedBox(height: 28),
+            ..._sectionChildren(l10n, id),
+          ],
         ],
       ),
     );

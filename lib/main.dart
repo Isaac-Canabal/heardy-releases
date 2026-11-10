@@ -38,8 +38,11 @@ import 'providers/auth_provider.dart';
 import 'providers/cloud_library_provider.dart';
 import 'providers/download_provider.dart';
 import 'providers/explore_provider.dart';
+import 'providers/followed_artists_provider.dart';
+import 'providers/heardy_mixer_provider.dart';
 import 'providers/music_provider.dart';
 import 'providers/notifications_provider.dart';
+import 'providers/update_gate_provider.dart';
 import 'providers/settings_provider.dart';
 import 'providers/folder_sync_provider.dart';
 import 'providers/lan_sync_provider.dart';
@@ -47,6 +50,7 @@ import 'services/folder_sync_service.dart';
 import 'services/library_storage.dart';
 import 'providers/sync_provider.dart';
 import 'screens/legal_screen.dart';
+import 'screens/update_required_screen.dart';
 import 'screens/main_shell_screen.dart';
 import 'screens/playlist_detail_screen.dart';
 import 'services/desktop_layout.dart';
@@ -54,6 +58,11 @@ import 'services/desktop_shortcuts.dart';
 import 'services/desktop_taskbar_service.dart';
 import 'services/desktop_title_bar.dart';
 import 'services/desktop_tray_service.dart';
+import 'theme/app_fonts.dart';
+import 'services/mix/platform/mix_licenses.dart';
+import 'services/mix/platform/mixer_environment.dart';
+import 'services/mix/mix_library.dart';
+import 'screens/mixes_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/desktop_title_bar.dart';
 import 'package:heardy/services/app_log.dart';
@@ -109,6 +118,8 @@ Future<void> _migrateLegacyWindowsDataDir(Directory newSupportDir) async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  registerFontLicenses();
+  registerMixLicenses();
 
   // `sqflite` no tiene motor propio de base de datos en escritorio (a
   // diferencia de Android/iOS, que traen SQLite del sistema): hay que
@@ -326,6 +337,16 @@ void main() async {
     await musicProvider.loadPlaylists();
     musicProvider.notifyLibraryChanged();
   });
+  final followedArtistsProvider = FollowedArtistsProvider()..load();
+  // Los servicios del Mixer (bibliotecas nativas, rutas) se crean al abrirlo.
+  final heardyMixerProvider = HeardyMixerProvider(
+    services: createHeardyMixerServices,
+    source: downloadSource,
+    coverMaker: fusedMixCoverMaker(),
+  );
+  final MixLibrary mixLibrary = LocalMixLibrary(saver: DownloadService(source: downloadSource).importPrivateAudio);
+  registerMixesSection();
+  bindCloudFollowsRefresh(syncProvider, followedArtistsProvider.load);
   final folderSyncProvider = FolderSyncProvider(
     libraryRoot: () => musicProvider.libraryRootUri,
     onImported: () async {
@@ -334,11 +355,13 @@ void main() async {
       musicProvider.notifyLibraryChanged();
     },
   );
+  bindImportedFollowsRefresh(folderSyncProvider, followedArtistsProvider.load);
   final lanSyncProvider = LanSyncProvider(
     folderService: (deviceId, label) => FolderSyncService(
       storage: defaultLibraryStorage(),
       deviceId: deviceId,
       deviceLabel: label,
+      onFollowedArtistsChanged: followedArtistsProvider.load,
     ),
     onImported: () async {
       await musicProvider.loadPlaylists();
@@ -346,9 +369,15 @@ void main() async {
       musicProvider.notifyLibraryChanged();
     },
   );
+  // Se carga antes de `runApp` para que un bloqueo ya conocido se vea en el
+  // primer fotograma, aun sin red.
+  final updateGateProvider = UpdateGateProvider();
+  await updateGateProvider.load();
+  updateGateProvider.attachBackGuard();
   final notificationsProvider = NotificationsProvider(
     cloudSource: cloudSource,
     language: () => settingsProvider.language,
+    updateGate: updateGateProvider,
   );
   final audioEffectsService = AudioEffectsService(
     androidSessionIds: audioHandler.player.androidAudioSessionIdStream,
@@ -369,6 +398,7 @@ void main() async {
         Provider<AudioPlayerHandler>.value(value: audioHandler),
         Provider<ServerPool>.value(value: serverPool),
         Provider<DownloadSource>.value(value: downloadSource),
+        Provider<MixLibrary>.value(value: mixLibrary),
         Provider<StreamResolver>.value(value: TimeoutStreamResolver(streamResolver)),
         Provider<CloudSource>.value(value: cloudSource),
         Provider<ArtistPhotoCache>.value(
@@ -381,16 +411,20 @@ void main() async {
         ChangeNotifierProvider.value(value: settingsProvider),
         ChangeNotifierProvider.value(value: musicProvider),
         ChangeNotifierProvider.value(value: downloadProvider),
+        ChangeNotifierProvider.value(value: heardyMixerProvider),
         ChangeNotifierProvider.value(value: syncProvider),
         ChangeNotifierProvider.value(value: folderSyncProvider),
         ChangeNotifierProvider.value(value: lanSyncProvider),
         ChangeNotifierProvider.value(value: notificationsProvider),
+        ChangeNotifierProvider.value(value: updateGateProvider),
         ChangeNotifierProvider.value(value: audioEffectsService),
+        ChangeNotifierProvider.value(value: followedArtistsProvider),
         ChangeNotifierProvider(
           create: (_) => ExploreProvider(
             source: downloadSource,
             country: () => settingsProvider.exploreCountry ?? deviceExploreCountry(),
             hiddenShelves: () => settingsProvider.exploreHiddenShelves,
+            followedArtists: () => followedArtistsProvider.followed,
           ),
         ),
         ChangeNotifierProvider(
@@ -420,7 +454,8 @@ void main() async {
     downloadProvider.retryPendingImports();
     // La sincronización con la nube es solo manual (Ajustes > Sincronizar ahora).
     // Igual que syncNow(): nunca await'ado, y sin sesión simplemente no
-    // encuentra solicitudes de amistad (ver NotificationsProvider).
+    // encuentra solicitudes de amistad (ver NotificationsProvider). Es también
+    // la primera comprobación de versión de la puerta de actualización.
     notificationsProvider.refresh();
   });
 }
@@ -442,7 +477,7 @@ class HeardyApp extends StatelessWidget {
           navigatorKey: desktopRootNavigatorKey,
           title: 'Heardy',
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.dark(),
+          theme: AppTheme.dark(fontFamily: settings.appFont.family),
           locale: settings.locale,
           localizationsDelegates: const [
             AppLocalizations.delegate,
@@ -455,7 +490,16 @@ class HeardyApp extends StatelessWidget {
           onGenerateRoute: RouteGenerator.generateRoute,
           builder: (context, child) => child == null
               ? const SizedBox.shrink()
-              : _DesktopPlaybackShortcuts(child: _DesktopWindowChrome(child: child)),
+              : _DesktopPlaybackShortcuts(
+                  // Por dentro del marco: la barra de título tiene alto fijo y
+                  // no es contenido de la app.
+                  child: _DesktopWindowChrome(
+                    // Por encima del Navigator: cubre diálogos y rutas empujadas.
+                    child: UpdateGate(
+                      child: UserTextScale(scale: settings.textScale, child: child),
+                    ),
+                  ),
+                ),
         );
       },
     );

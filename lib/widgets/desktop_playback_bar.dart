@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,8 +8,30 @@ import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_mini_mode_service.dart';
 import '../services/stream_queue_logic.dart';
+import '../models/now_playing_layout.dart';
+import '../providers/settings_provider.dart';
 import 'add_current_track.dart';
 import '../theme/app_theme.dart';
+import '../theme/area_colors.dart';
+
+const double _titleFontSize = 13;
+const double _artistFontSize = 11;
+const double _labelsGap = 2;
+
+/// Alto de línea holgado: cubre las fuentes empaquetadas y las de reserva del
+/// sistema (CJK, árabe), que son más altas.
+const double _lineHeightFactor = 1.5;
+
+/// Borde superior más aire alrededor del texto.
+const double _labelsMargin = 9;
+
+/// Alto de la barra: el de siempre, salvo que el texto ya no quepa en él.
+double desktopPlaybackBarHeight(TextScaler textScaler) {
+  final labels = (textScaler.scale(_titleFontSize) + textScaler.scale(_artistFontSize)) *
+          _lineHeightFactor +
+      _labelsGap;
+  return math.max(76, labels + _labelsMargin);
+}
 
 /// Barra inferior del escritorio, sólo bajo la columna de contenido (del
 /// borde de la barra lateral al borde del panel derecho): la línea de tiempo
@@ -42,7 +65,7 @@ class _DesktopPlaybackBarState extends State<DesktopPlaybackBar> {
         if (item == null) return const SizedBox.shrink();
 
         return Container(
-          height: 76,
+          height: desktopPlaybackBarHeight(MediaQuery.textScalerOf(context)),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -67,6 +90,13 @@ class _DesktopPlaybackBarState extends State<DesktopPlaybackBar> {
               ],
               Expanded(
                 child: WaveformSeekSection(
+                  // Esta barra es el minirreproductor del escritorio: su color
+                  // manda, y si no hay, el de los controles.
+                  activeColor: context.select<SettingsProvider, Color?>(
+                    (s) =>
+                        s.areaColor(ColorArea.miniPlayer) ??
+                        s.areaColor(ColorArea.playbackControls),
+                  ),
                   inline: true,
                   compact: true,
                   mediaItem: item,
@@ -90,7 +120,10 @@ class _DesktopPlaybackBarState extends State<DesktopPlaybackBar> {
                     ? l10n.desktopHideNowPlaying
                     : l10n.desktopShowNowPlaying,
                 icon: Icon(
-                  widget.panelOpen
+                  widget.panelOpen ==
+                          context.select<SettingsProvider, bool>(
+                            (s) => s.desktopPanelSide == DesktopPanelSide.right,
+                          )
                       ? Icons.keyboard_double_arrow_right_rounded
                       : Icons.keyboard_double_arrow_left_rounded,
                   color: Colors.white70,
@@ -173,6 +206,46 @@ class _DesktopVolumeControlState extends State<DesktopVolumeControl> {
   }
 }
 
+/// Título y artista de la barra. Es un widget aparte porque la barra necesita
+/// el `AudioPlayerHandler` real y así el desborde se puede probar con las
+/// fuentes de verdad.
+class DesktopTrackLabels extends StatelessWidget {
+  final String title;
+  final String artist;
+
+  const DesktopTrackLabels({super.key, required this.title, required this.artist});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: _titleFontSize,
+          ),
+        ),
+        const SizedBox(height: _labelsGap),
+        Text(
+          artist,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.45),
+            fontSize: _artistFontSize,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _TrackInfo extends StatelessWidget {
   final MediaItem item;
   final VoidCallback onTap;
@@ -217,32 +290,10 @@ class _TrackInfo extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Flexible(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      item.artist ??
-                          AppLocalizations.of(context)!.commonUnknownArtist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.45),
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
+                child: DesktopTrackLabels(
+                  title: item.title,
+                  artist: item.artist ??
+                      AppLocalizations.of(context)!.commonUnknownArtist,
                 ),
               ),
             ],
@@ -268,6 +319,12 @@ class _Transport extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = resolveMiniPlayerColors(
+      context.select<SettingsProvider, Color?>(
+        (s) => s.areaColor(ColorArea.miniPlayer),
+      ),
+      progress: AppTheme.accent,
+    );
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -285,14 +342,15 @@ class _Transport extends StatelessWidget {
             final playing = snapshot.data?.playing ?? false;
             return Container(
               decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
+                color: colors.playButton,
+                gradient: colors.playButton == null ? AppTheme.primaryGradient : null,
                 shape: BoxShape.circle,
               ),
               child: IconButton(
                 iconSize: 24,
                 icon: Icon(
                   playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white,
+                  color: colors.playIcon,
                 ),
                 onPressed: () =>
                     playing ? audioHandler.pause() : audioHandler.play(),

@@ -1,11 +1,14 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../l10n/app_localizations.dart';
 import '../models/explore.dart';
 import '../models/song.dart';
 import '../providers/explore_provider.dart';
+import '../providers/followed_artists_provider.dart';
+import '../screens/heardy_mixer_screen.dart';
 import '../services/download_source.dart';
 import '../theme/app_theme.dart';
 import 'desktop_horizontal_scroller.dart';
@@ -322,6 +325,15 @@ class ExploreTrackCard extends StatelessWidget {
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 onDownload();
+              },
+            ),
+            ListTile(
+              key: Key('card_mix_${track.id}'),
+              leading: Icon(Icons.multitrack_audio_rounded, color: AppTheme.primaryLight),
+              title: Text(l10n.mixerMixWith),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                Navigator.of(context).push(HeardyMixerScreen.route(preselectRemoteA: track));
               },
             ),
           ],
@@ -698,6 +710,37 @@ class ExploreRelatedArtistsRow extends StatelessWidget {
         alignment: Alignment.center,
         child: const Icon(Icons.person_rounded, color: Colors.white70, size: 40),
       );
+}
+
+/// Seguir o dejar de seguir a un artista; es local, no pide sesión. Sin
+/// [channelId] no hay a quién seguir y no se muestra.
+class FollowArtistButton extends StatelessWidget {
+  final String channelId;
+  final String name;
+  final String thumbnailUrl;
+
+  const FollowArtistButton({super.key, required this.channelId, required this.name, this.thumbnailUrl = ''});
+
+  @override
+  Widget build(BuildContext context) {
+    if (channelId.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
+    final followed = context.watch<FollowedArtistsProvider>();
+    final following = followed.isFollowing(channelId);
+    return OutlinedButton.icon(
+      key: const Key('explore_artist_follow'),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: following ? Colors.white.withValues(alpha: 0.12) : Colors.transparent,
+        side: BorderSide(color: Colors.white.withValues(alpha: following ? 0.2 : 0.5)),
+      ),
+      onPressed: () => following
+          ? followed.unfollow(channelId)
+          : followed.follow(channelId: channelId, name: name, thumbnailUrl: thumbnailUrl),
+      icon: Icon(following ? Icons.check_rounded : Icons.add_rounded, size: 18),
+      label: Text(following ? l10n.exploreArtistFollowing : l10n.exploreArtistFollow),
+    );
+  }
 }
 
 class MoodChipsRow extends StatelessWidget {

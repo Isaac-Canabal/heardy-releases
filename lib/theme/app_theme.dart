@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../providers/settings_provider.dart';
+import 'area_colors.dart';
 
 /// Visual design system for Heardy.
 abstract final class AppTheme {
@@ -17,6 +18,18 @@ abstract final class AppTheme {
   static Color get primary => _p.primary;
   static Color get primaryLight => _p.primaryLight;
   static Color get accent => _p.accent;
+
+  /// Acento de la reproducción: estados activos, barra de tiempo y hojas de
+  /// opciones. Claro a propósito, porque va sobre fondos casi negros.
+  static Color get playerAccent => _p.playerAccent ?? _p.primaryLight;
+
+  /// Igual que [playerAccent], pero suscribe a [context] al tema: quien siga en
+  /// pantalla (el panel de escritorio) se redibuja al cambiar de preset.
+  static Color playerAccentOf(BuildContext context) {
+    Theme.of(context);
+    return playerAccent;
+  }
+
   static Color get accentPink => _p.accentPink;
   static Color get surface => _p.surface;
   static Color get surfaceLight => _p.surfaceLight;
@@ -72,7 +85,7 @@ abstract final class AppTheme {
         offset: const Offset(0, 8),
       );
 
-  static ThemeData dark() {
+  static ThemeData dark({String? fontFamily}) {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
@@ -84,13 +97,17 @@ abstract final class AppTheme {
         onPrimary: Colors.white,
         onSurface: Colors.white,
       ),
-      appBarTheme: const AppBarTheme(
+      fontFamily: fontFamily,
+      appBarTheme: AppBarTheme(
         elevation: 0,
         scrolledUnderElevation: 0,
         centerTitle: false,
         foregroundColor: Colors.white,
         backgroundColor: Colors.transparent,
+        // Este estilo y el del SnackBar reemplazan el `DefaultTextStyle` en vez
+        // de mezclarse con él, así que `fontFamily` no les llega desde el tema.
         titleTextStyle: TextStyle(
+          fontFamily: fontFamily,
           color: Colors.white,
           fontSize: 22,
           fontWeight: FontWeight.w800,
@@ -125,7 +142,7 @@ abstract final class AppTheme {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         backgroundColor: surfaceLight,
-        contentTextStyle: const TextStyle(color: Colors.white),
+        contentTextStyle: TextStyle(fontFamily: fontFamily, color: Colors.white),
         actionTextColor: primaryLight,
       ),
       textTheme: const TextTheme(
@@ -196,6 +213,10 @@ abstract final class AppTheme {
     return _Palette(
       primary: primary,
       primaryLight: primaryLight,
+      playerAccent: ensureReadableOnDark(
+        primaryLight,
+        background: _playerSheetBackground,
+      ),
       accent: secondary,
       accentPink: secondary,
       surface: shade(0.09),
@@ -268,10 +289,14 @@ abstract final class AppTheme {
     return '${m} min';
   }
 
+  /// El fondo más claro sobre el que va [playerAccent].
+  static const _playerSheetBackground = Color(0xFF1A1A1A);
+
   static final _palettes = {
     AppThemePreset.navy: _Palette(
       primary: Color(0xFF2563EB),
       primaryLight: Color(0xFF60A5FA),
+      playerAccent: Color(0xFF8C9EFF),
       accent: Color(0xFF38BDF8),
       accentPink: Color(0xFF6366F1),
       surface: Color(0xFF0F1729),
@@ -374,6 +399,7 @@ abstract final class AppTheme {
 class _Palette {
   final Color primary;
   final Color primaryLight;
+  final Color? playerAccent;
   final Color accent;
   final Color accentPink;
   final Color surface;
@@ -386,6 +412,7 @@ class _Palette {
   const _Palette({
     required this.primary,
     required this.primaryLight,
+    this.playerAccent,
     required this.accent,
     required this.accentPink,
     required this.surface,

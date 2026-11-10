@@ -19,6 +19,9 @@ class Song {
   final bool missing; // tombstone: true if not seen in the last scan
   // Download branch (schema v11) — null for songs the user supplied himself.
   final String? sourceUrl; // canonical URL this song was downloaded from
+  // Heardy Mixer (schema v19): un mix guardado en una playlist. Nunca sale del
+  // dispositivo: queda fuera de la nube, la carpeta y el Wi-Fi.
+  final bool isMix;
 
   Song({
     required this.id,
@@ -37,6 +40,7 @@ class Song {
     this.album,
     this.missing = false,
     this.sourceUrl,
+    this.isMix = false,
   });
 
   Song copyWith({
@@ -56,6 +60,7 @@ class Song {
     String? album,
     bool? missing,
     String? sourceUrl,
+    bool? isMix,
   }) {
     return Song(
       id: id ?? this.id,
@@ -74,6 +79,7 @@ class Song {
       album: album ?? this.album,
       missing: missing ?? this.missing,
       sourceUrl: sourceUrl ?? this.sourceUrl,
+      isMix: isMix ?? this.isMix,
     );
   }
 
@@ -99,6 +105,7 @@ class Song {
       'album': album,
       'missing': missing ? 1 : 0,
       'sourceUrl': sourceUrl,
+      'isMix': isMix ? 1 : 0,
     };
   }
 
@@ -120,6 +127,7 @@ class Song {
       album: map['album'] as String?,
       missing: (map['missing'] as int? ?? 0) != 0,
       sourceUrl: map['sourceUrl'] as String?,
+      isMix: (map['isMix'] as int? ?? 0) != 0,
     );
   }
 

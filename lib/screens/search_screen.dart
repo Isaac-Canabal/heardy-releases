@@ -426,6 +426,7 @@ class _SearchScreenState extends State<SearchScreen> with RemoteTrackActionsMixi
           circular: true,
           onTap: () => Navigator.of(context).push(ExploreArtistScreen.route(
             name: h.name,
+            channelId: h.channelId,
             thumbnailUrl: h.thumbnailUrl,
             loader: () => source.exploreArtist(h.channelId),
           )),
