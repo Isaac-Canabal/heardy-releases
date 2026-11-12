@@ -261,9 +261,9 @@ endif()
 # confiable: se extrae en su propio directorio nuevo y solo se copian
 # ffmpeg.exe, sus DLL y LICENSE.txt. La app lo busca en <exe>/ffmpeg/ffmpeg.exe;
 # sin el, la onda cae al Slider.
-set(FFMPEG_TAG "autobuild-2026-10-28-19-47")
-set(FFMPEG_DIRNAME "ffmpeg-n8.1.3-25-g611cec792a-win64-lgpl-shared-8.1")
-set(FFMPEG_SHA256 "0448c3f3b9bdc724cc0189d5ce6e6bfa5b8937e7ec408e1e97fb08719bdb3b92")
+set(FFMPEG_TAG "autobuild-2026-11-12-15-40")
+set(FFMPEG_DIRNAME "ffmpeg-n8.1.3-35-gf1acb0a266-win64-lgpl-shared-8.1")
+set(FFMPEG_SHA256 "bb6eedd1978549c84e8dff7b72c885df090db6a6ee1de44e76c8855babea495c")
 set(FFMPEG_ZIP "${CMAKE_BINARY_DIR}/ffmpeg-dl/${FFMPEG_DIRNAME}.zip")
 set(FFMPEG_EXTRACT_DIR "${CMAKE_BINARY_DIR}/ffmpeg-extract-${FFMPEG_TAG}")
 set(FFMPEG_FILES
