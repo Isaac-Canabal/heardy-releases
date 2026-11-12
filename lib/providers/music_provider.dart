@@ -14,7 +14,7 @@ import '../services/stream_resolver.dart';
 
 class MusicProvider with ChangeNotifier {
   final DatabaseHelper _dbHelper = DatabaseHelper.instance;
-  final StorageService _storageService = StorageService();
+  final StorageService _storageService;
 
   List<Playlist> _playlists = [];
   List<Song> _currentPlaylistSongs = [];
@@ -39,7 +39,8 @@ class MusicProvider with ChangeNotifier {
   // never saw anything imported after the app's cold start.
   int get librarySongsVersion => _librarySongsVersion;
 
-  MusicProvider() {
+  MusicProvider({StorageService? storageService})
+      : _storageService = storageService ?? StorageService() {
     loadPlaylists();
     refreshInboxCount();
     refreshLibraryRootUri();
@@ -296,10 +297,28 @@ class MusicProvider with ChangeNotifier {
       );
 
       await _dbHelper.insertPlaylist(newPlaylist);
+      await _ensurePlaylistFolder(newPlaylist);
       await loadPlaylists();
     } catch (e) {
       print("Error creating playlist: $e");
       rethrow;
+    }
+  }
+
+  /// Crea en el dispositivo la carpeta de una playlist local recién creada,
+  /// aunque esté vacía. Usa el mismo punto que la ruta perezosa de las
+  /// descargas ([StorageService.resolvePlaylistFolder]): busca antes de crear,
+  /// así que es idempotente y ambas rutas dan el mismo nombre. Nunca falla:
+  /// sin carpeta de biblioteca o con un error de almacenamiento la playlist
+  /// ya está en la base y la carpeta se creará al añadir la primera canción.
+  Future<void> _ensurePlaylistFolder(Playlist playlist) async {
+    if (playlist.kind != Playlist.kindLocal) return;
+    try {
+      final rootUri = _libraryRootUri ?? await _storageService.getLibraryRootUri();
+      if (rootUri == null) return;
+      await _storageService.resolvePlaylistFolder(rootUri, playlist.name);
+    } catch (e) {
+      print('No se pudo crear la carpeta de la playlist "${playlist.name}": $e');
     }
   }
 
@@ -325,6 +344,7 @@ class MusicProvider with ChangeNotifier {
         kind: kind,
       );
       await _dbHelper.insertPlaylist(newPlaylist);
+      await _ensurePlaylistFolder(newPlaylist);
       await loadPlaylists();
     } catch (e) {
       print("Error creating playlist: $e");

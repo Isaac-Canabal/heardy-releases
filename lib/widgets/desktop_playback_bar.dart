@@ -1,12 +1,15 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_mini_mode_service.dart';
+import '../services/overlap_view.dart';
+import 'overlap_cover_stack.dart';
 import '../services/stream_queue_logic.dart';
 import '../models/now_playing_layout.dart';
 import '../providers/settings_provider.dart';
@@ -83,7 +86,11 @@ class _DesktopPlaybackBarState extends State<DesktopPlaybackBar> {
           child: Row(
             children: [
               if (!widget.panelOpen) ...[
-                _TrackInfo(item: item, onTap: widget.onTogglePanel),
+                _TrackInfo(
+                  item: item,
+                  overlap: audioHandler.overlapView,
+                  onTap: widget.onTogglePanel,
+                ),
                 const SizedBox(width: 8),
                 _Transport(audioHandler: audioHandler),
                 const SizedBox(width: 8),
@@ -248,14 +255,40 @@ class DesktopTrackLabels extends StatelessWidget {
 
 class _TrackInfo extends StatelessWidget {
   final MediaItem item;
+  final ValueListenable<OverlapView?> overlap;
   final VoidCallback onTap;
-  const _TrackInfo({required this.item, required this.onTap});
+  const _TrackInfo({required this.item, required this.overlap, required this.onTap});
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _cover(MediaItem item) {
     final artPath = item.extras?['artPath'] as String? ?? '';
     final hasArt = artPath.isNotEmpty && File(artPath).existsSync();
     final artUrl = remoteArtUrlFor(artPath, item.artUri);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: hasArt
+          ? Image.file(
+              File(artPath),
+              width: 44,
+              height: 44,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => _placeholder(item.title),
+            )
+          : artUrl != null
+          ? Image.network(
+              artUrl,
+              key: ValueKey(artUrl),
+              width: 44,
+              height: 44,
+              fit: BoxFit.cover,
+              cacheHeight: 132,
+              errorBuilder: (_, __, ___) => _placeholder(item.title),
+            )
+          : _placeholder(item.title),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return InkWell(
       borderRadius: BorderRadius.circular(8),
       onTap: onTap,
@@ -266,34 +299,32 @@ class _TrackInfo extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: hasArt
-                    ? Image.file(
-                        File(artPath),
-                        width: 44,
-                        height: 44,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => _placeholder(item.title),
-                      )
-                    : artUrl != null
-                    ? Image.network(
-                        artUrl,
-                        key: ValueKey(artUrl),
-                        width: 44,
-                        height: 44,
-                        fit: BoxFit.cover,
-                        cacheHeight: 132,
-                        errorBuilder: (_, __, ___) => _placeholder(item.title),
-                      )
-                    : _placeholder(item.title),
+              OverlapCoverStack(
+                item: item,
+                overlap: overlap,
+                size: 44,
+                coverBuilder: (context, it) => _cover(it),
               ),
               const SizedBox(width: 10),
               Flexible(
-                child: DesktopTrackLabels(
-                  title: item.title,
-                  artist: item.artist ??
-                      AppLocalizations.of(context)!.commonUnknownArtist,
+                child: ValueListenableBuilder<OverlapView?>(
+                  valueListenable: overlap,
+                  builder: (context, view, _) {
+                    final shown = displayedMediaItem(item, view);
+                    return AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      layoutBuilder: (current, previous) => Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [...previous, if (current != null) current],
+                      ),
+                      child: DesktopTrackLabels(
+                        key: ValueKey<String>(shown.id),
+                        title: shown.title,
+                        artist: shown.artist ??
+                            AppLocalizations.of(context)!.commonUnknownArtist,
+                      ),
+                    );
+                  },
                 ),
               ),
             ],

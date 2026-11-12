@@ -51,17 +51,34 @@ class JustAudioMediaKit extends JustAudioPlatform {
   static final _logger = Logger('JustAudioMediaKit');
   final _players = HashMap<String, MediaKitPlayer>();
 
-  /// Patch de Heardy: el [MediaKitPlayer] (y su [Player] nativo de mpv) más
-  /// reciente creado — `just_audio.AudioPlayer.id` es privado, así que no
-  /// hay forma de pedir "el de este id puntual" desde afuera del paquete.
-  /// Sirve porque Heardy sólo crea un único `AudioPlayer` para toda la app
-  /// (`AudioPlayerHandler._player`, ver audio_effects_service.dart); si eso
-  /// dejara de ser cierto, este patch necesitaría revisarse.
-  static MediaKitPlayer? lastCreatedPlayer;
+  /// Patch de Heardy: `just_audio.AudioPlayer.id` es privado, así que no hay
+  /// forma de pedir "el de este id puntual" desde afuera del paquete. Se separa
+  /// el reproductor principal de la voz fantasma del fundido entre canciones:
+  /// el handler pone [creatingGhost] en true mientras la fantasma crea su
+  /// reproductor nativo, y ese queda en una lista aparte.
+  static bool creatingGhost = false;
+
+  static final List<MediaKitPlayer> _mainPlayers = <MediaKitPlayer>[];
+  static final List<MediaKitPlayer> _ghostPlayers = <MediaKitPlayer>[];
+
+  /// El reproductor principal más reciente (just_audio lo recrea tras un stop).
+  static MediaKitPlayer? get lastCreatedPlayer =>
+      _mainPlayers.isEmpty ? null : _mainPlayers.last;
 
   /// Atajo sobre [lastCreatedPlayer] para setearle propiedades de mpv (`af`)
-  /// que la API de `just_audio` no expone.
+  /// que la API de `just_audio` no expone. Nunca es la voz fantasma.
   static Player? get rawPlayer => lastCreatedPlayer?.rawPlayer;
+
+  /// Los [Player] de mpv vivos de la voz fantasma.
+  static List<Player> get rawGhostPlayers =>
+      [for (final p in _ghostPlayers) p.rawPlayer];
+
+  /// Principal y fantasma, para lo que debe valer en las dos voces (el
+  /// ecualizador).
+  static List<Player> get rawPlayers => [
+        if (rawPlayer != null) rawPlayer!,
+        ...rawGhostPlayers,
+      ];
 
   /// Players that are disposing (player id -> future that completes when the player is disposed)
   final _disposingPlayers = HashMap<String, Future<void>>();
@@ -106,7 +123,7 @@ class JustAudioMediaKit extends JustAudioPlatform {
     _logger.fine('instantiating new player ${request.id}');
     final player = MediaKitPlayer(request.id);
     _players[request.id] = player;
-    lastCreatedPlayer = player;
+    (creatingGhost ? _ghostPlayers : _mainPlayers).add(player);
     await player.ready();
     _logger.fine('player ready! (players: $_players)');
     return player;
@@ -132,7 +149,8 @@ class JustAudioMediaKit extends JustAudioPlatform {
     final player = _players[request.id]!;
     final future = player.release();
     _players.remove(request.id);
-    if (identical(lastCreatedPlayer, player)) lastCreatedPlayer = null;
+    _mainPlayers.remove(player);
+    _ghostPlayers.remove(player);
     _disposingPlayers[request.id] = future;
     await future;
     _disposingPlayers.remove(request.id);
@@ -148,6 +166,8 @@ class JustAudioMediaKit extends JustAudioPlatform {
     if (_players.isNotEmpty) {
       await Future.wait(_players.values.map((e) => e.release()));
       _players.clear();
+      _mainPlayers.clear();
+      _ghostPlayers.clear();
     }
     return DisposeAllPlayersResponse();
   }

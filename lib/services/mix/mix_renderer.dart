@@ -29,12 +29,16 @@ class RenderedBus {
   int sampleOfBar(int bar) => offset + bar * targetBar - startSample;
 }
 
+/// [semitones] transpone la canción que no es base y [semitonesBase] la base
+/// (sin cambiar el tempo ni la duración: mismo WSOLA + remuestreo sinc).
+///
 /// [soloSong] solo sirve para medir: suma únicamente lo que aporta esa canción,
 /// con los pesos del plan completo, y no recorta silencios (así dos renders en
 /// solitario quedan alineados muestra a muestra).
 RenderedBus renderPlan(List<MixSeg> segs, MixSong base,
     {double? tempoBpm,
     double semitones = 0,
+    double semitonesBase = 0,
     MixTick? tick,
     MixBandSplit bandSplit = MixBandSplit.linkwitzRiley4,
     String? soloSong}) {
@@ -74,7 +78,11 @@ RenderedBus renderPlan(List<MixSeg> segs, MixSong base,
     Clip clip;
     if (song == base) {
       clip = slice(st.l, st.r, s0, s1);
-      if (baseStretched) clip = wsola(clip, (clip.length * baseScale).round());
+      if (semitonesBase != 0) {
+        clip = stretchPitch(clip, baseStretched ? (clip.length * baseScale).round() : clip.length, semitonesBase);
+      } else if (baseStretched) {
+        clip = wsola(clip, (clip.length * baseScale).round());
+      }
     } else {
       final outLen = ((s.bars + preBars + postBars) * targetBar).round();
       clip = stretchPitch(slice(st.l, st.r, s0, s1), outLen, semitones);

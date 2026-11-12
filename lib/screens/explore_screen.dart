@@ -13,6 +13,7 @@ import '../providers/music_provider.dart';
 import '../providers/settings_provider.dart';
 import '../services/audio_player_handler.dart';
 import '../services/download_source.dart';
+import '../services/explore_queue.dart';
 import '../services/explore_logic.dart';
 import '../services/remote_track_actions.dart';
 import '../services/stream_resolver.dart';
@@ -129,7 +130,7 @@ class _ExploreScreenState extends State<ExploreScreen>
 
   /// Acción por defecto de una tarjeta: reproducir. Si la canción ya está en la
   /// biblioteca se usa el archivo local (sin red); si no, streaming.
-  Future<void> _playTrack(RemoteTrack track) async {
+  Future<void> _playTrack(RemoteTrack track, {List<RemoteTrack>? queue}) async {
     if (_startingPlay || streamingTrackId != null) return;
     _startingPlay = true;
     try {
@@ -139,7 +140,11 @@ class _ExploreScreenState extends State<ExploreScreen>
         await _playLocal(local, [local]);
         return;
       }
-      await listenRemoteTrack(track);
+      if (queue != null && queue.isNotEmpty) {
+        await listenRemoteQueue(queue, track);
+      } else {
+        await listenRemoteTrack(track);
+      }
     } finally {
       _startingPlay = false;
     }
@@ -599,7 +604,16 @@ class _ExploreScreenState extends State<ExploreScreen>
         return ExploreTrackCard(
           track: track,
           onDownload: () => downloadRemoteTrack(track),
-          onPlay: streamingSupported ? () => _playTrack(track) : null,
+          onPlay: streamingSupported
+              ? () => _playTrack(
+                    track,
+                    queue: exploreQueueFrom(
+                      tracks,
+                      i,
+                      transform: upscale ? withUpscaledThumbnail : null,
+                    ),
+                  )
+              : null,
           isLoadingStream: streamingTrackId == track.id,
         );
       },

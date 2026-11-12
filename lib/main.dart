@@ -17,6 +17,7 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'services/database_helper.dart';
+import 'services/transition_playback.dart';
 import 'services/artist_photo_cache.dart';
 import 'services/audio_effects_service.dart';
 import 'services/audio_player_handler.dart';
@@ -41,6 +42,8 @@ import 'providers/explore_provider.dart';
 import 'providers/followed_artists_provider.dart';
 import 'providers/heardy_mixer_provider.dart';
 import 'providers/music_provider.dart';
+import 'providers/playlist_transitions_provider.dart';
+import 'services/transition/platform/transition_environment.dart';
 import 'providers/notifications_provider.dart';
 import 'providers/update_gate_provider.dart';
 import 'providers/settings_provider.dart';
@@ -114,6 +117,39 @@ Future<void> _migrateLegacyWindowsDataDir(Directory newSupportDir) async {
 
   await newSupportDir.create(recursive: true);
   await marker.writeAsString(DateTime.now().toIso8601String());
+}
+
+/// Consulta del manejador para las transiciones de playlist: sólo si la
+/// playlist las tiene activas y el par fue preparado o guardado por el usuario;
+/// renderiza (o recupera de la caché) su clip. Nunca analiza ni sugiere. Nunca lanza.
+Future<TransitionPlayback?> Function(String, String, String) _transitionLookupFor(PlaylistTransitionsProvider provider) {
+  final loaded = <String>{};
+  return (playlistId, fromId, toId) async {
+    try {
+      final db = DatabaseHelper.instance;
+      if (loaded.add(playlistId)) await provider.load(playlistId, await db.getSongsForPlaylist(playlistId));
+      if (!provider.isEnabled(playlistId)) return null;
+      final from = await db.getSongById(fromId);
+      final to = await db.getSongById(toId);
+      if (from == null || to == null) return null;
+      final pair = TransitionPair(from, to);
+      if (!pair.eligible) return null;
+      final clip = await provider.playbackClipFor(playlistId, pair);
+      if (clip == null) return null;
+      final info = clip.info;
+      return TransitionPlayback(
+        clipPath: clip.wavPath,
+        clipSec: info.clipSec,
+        clipStartInOutgoingSec: info.clipStartInOutgoingSec,
+        handoverInClipSec: info.handoverInClipSec,
+        handoverInIncomingSec: info.handoverInIncomingSec,
+        overlapStartInClipSec: info.overlapStartInClipSec,
+      );
+    } catch (e) {
+      print('Transición: no se pudo preparar el clip (${e.runtimeType})');
+      return null;
+    }
+  };
 }
 
 void main() async {
@@ -344,6 +380,7 @@ void main() async {
     source: downloadSource,
     coverMaker: fusedMixCoverMaker(),
   );
+  final playlistTransitionsProvider = PlaylistTransitionsProvider(service: createTransitionService);
   final MixLibrary mixLibrary = LocalMixLibrary(saver: DownloadService(source: downloadSource).importPrivateAudio);
   registerMixesSection();
   bindCloudFollowsRefresh(syncProvider, followedArtistsProvider.load);
@@ -387,6 +424,8 @@ void main() async {
       return (path == null || path.isEmpty) ? null : path;
     }).distinct(),
   );
+  audioHandler.onCrossfadeVoiceReady = audioEffectsService.reapplyEqualizer;
+  audioHandler.transitionLookup = _transitionLookupFor(playlistTransitionsProvider);
 
   final StreamResolver streamResolver = Platform.isWindows
       ? CachingStreamResolver(WindowsYtdlpStreamResolver(ytdlpPath ?? ''))
@@ -412,6 +451,7 @@ void main() async {
         ChangeNotifierProvider.value(value: musicProvider),
         ChangeNotifierProvider.value(value: downloadProvider),
         ChangeNotifierProvider.value(value: heardyMixerProvider),
+        ChangeNotifierProvider.value(value: playlistTransitionsProvider),
         ChangeNotifierProvider.value(value: syncProvider),
         ChangeNotifierProvider.value(value: folderSyncProvider),
         ChangeNotifierProvider.value(value: lanSyncProvider),

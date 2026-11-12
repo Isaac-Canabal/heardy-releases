@@ -203,4 +203,9 @@ const kSpleeterMitLicense = 'Spleeter 2-stem model (https://github.com/deezer/sp
 
 const kUvrNotice = 'MDX-Net models UVR_MDXNET_9482 and UVR-MDX-NET-Voc_FT from Ultimate Vocal Remover '
     '(https://github.com/Anjok07/ultimatevocalremovergui), as converted by sherpa-onnx; downloaded only on request. '
-    'Credit: UVR and its developers. MDX-Net architecture by Kuielab and Woosung Choi.\n\nMIT License\n$_mit';
+    'Credit: UVR and its developers, who trained the models. MDX-Net architecture by Kuielab and Woosung Choi. '
+    'The models were published in the UVR public model repository (https://github.com/TRvlvr/model_repo) and '
+    'converted to ONNX by the sherpa-onnx project (https://github.com/k2-fsa/sherpa-onnx/releases/tag/source-separation-models).'
+    '\n\nLicense: the UVR project licenses its application code under the MIT License. The authors have not '
+    'published a license for the model weights themselves, so Heardy does not redistribute them: they are '
+    'downloaded only when you ask, from the sherpa-onnx release, and are credited to their authors.';

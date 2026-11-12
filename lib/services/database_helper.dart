@@ -34,7 +34,7 @@ class DatabaseHelper {
 
     return await openDatabase(
       path,
-      version: 20,
+      version: 22,
       onCreate: _createDB,
       onUpgrade: _onUpgrade,
       onConfigure: _onConfigure,
@@ -132,6 +132,7 @@ class DatabaseHelper {
     await db.execute(_createFollowedArtistsSql);
     await db.execute(_createMixesSql);
     await db.execute(_createIgnoredRecommendationsSql);
+    await db.execute(_createPlaylistTransitionsSql);
   }
 
   Future _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -310,7 +311,35 @@ class DatabaseHelper {
       // este dispositivo. Sólo local: nunca se sincroniza ni se exporta.
       await db.execute(_createIgnoredRecommendationsSql);
     }
+    if (oldVersion < 21) {
+      // Transiciones entre canciones de una playlist. Sólo local: nunca se
+      // sincronizan ni se exportan. Sin claves foráneas a propósito: un
+      // INSERT OR REPLACE sobre `songs` borraría en cascada las transiciones.
+      await db.execute(_createPlaylistTransitionsSql);
+    }
+    if (oldVersion < 22) {
+      // Estilo con el que se hizo cada mix y cómo se llegó a él. Sólo local.
+      // Una migración interrumpida (o la tabla creada ya con las columnas)
+      // puede haberlas dejado ya.
+      final mixColumns = await db.rawQuery('PRAGMA table_info(mixes)');
+      for (final col in ['styleId', 'styleOrigin']) {
+        if (mixColumns.isNotEmpty && !mixColumns.any((c) => c['name'] == col)) {
+          await db.execute('ALTER TABLE mixes ADD COLUMN $col TEXT');
+        }
+      }
+    }
   }
+
+  static const _createPlaylistTransitionsSql = '''
+    CREATE TABLE IF NOT EXISTS playlist_transitions (
+      playlistId TEXT NOT NULL,
+      fromSongId TEXT NOT NULL,
+      toSongId TEXT NOT NULL,
+      json TEXT NOT NULL,
+      updatedAt TEXT NOT NULL,
+      PRIMARY KEY (playlistId, fromSongId, toSongId)
+    )
+  ''';
 
   static const _createIgnoredRecommendationsSql = '''
     CREATE TABLE IF NOT EXISTS ignored_recommendations (
@@ -349,7 +378,9 @@ class DatabaseHelper {
       filePath TEXT NOT NULL,
       artPath TEXT NOT NULL,
       createdAt TEXT NOT NULL,
-      savedSongId TEXT
+      savedSongId TEXT,
+      styleId TEXT,
+      styleOrigin TEXT
     )
   ''';
 
@@ -730,6 +761,8 @@ class DatabaseHelper {
       }
     }
 
+    await deleteTransitionsOfSong(songId);
+
     // 3. Delete DB record. Foreign key CASCADE deletes joint record in playlist_songs.
     await db.delete(
       'songs',
@@ -870,6 +903,7 @@ class DatabaseHelper {
     final db = await database;
     // Foreign key constraint (ON DELETE CASCADE) will automatically delete associated playlist_songs rows.
     await db.transaction((txn) async {
+      await txn.delete('playlist_transitions', where: 'playlistId = ?', whereArgs: [id]);
       await txn.delete(
         'playlists',
         where: 'id = ?',
@@ -1494,6 +1528,50 @@ class DatabaseHelper {
       'UPDATE songs SET isMix = 1 WHERE isMix = 0 AND id IN (${List.filled(ids.length, '?').join(',')})',
       ids,
     );
+  }
+
+  Future<Map<String, String>?> getPlaylistTransition(String playlistId, String fromSongId, String toSongId) async {
+    final db = await database;
+    final rows = await db.query('playlist_transitions',
+        where: 'playlistId = ? AND fromSongId = ? AND toSongId = ?', whereArgs: [playlistId, fromSongId, toSongId]);
+    return rows.isEmpty ? null : {'json': rows.first['json'] as String, 'updatedAt': rows.first['updatedAt'] as String};
+  }
+
+  Future<void> setPlaylistTransition(String playlistId, String fromSongId, String toSongId, String json) async {
+    final db = await database;
+    await db.insert(
+        'playlist_transitions',
+        {
+          'playlistId': playlistId,
+          'fromSongId': fromSongId,
+          'toSongId': toSongId,
+          'json': json,
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> deletePlaylistTransition(String playlistId, String fromSongId, String toSongId) async {
+    final db = await database;
+    await db.delete('playlist_transitions',
+        where: 'playlistId = ? AND fromSongId = ? AND toSongId = ?', whereArgs: [playlistId, fromSongId, toSongId]);
+  }
+
+  /// Rows are keyed `fromSongId>toSongId`.
+  Future<Map<String, String>> listPlaylistTransitions(String playlistId) async {
+    final db = await database;
+    final rows = await db.query('playlist_transitions', where: 'playlistId = ?', whereArgs: [playlistId]);
+    return {for (final r in rows) '${r['fromSongId']}>${r['toSongId']}': r['json'] as String};
+  }
+
+  Future<void> deleteTransitionsOfPlaylist(String playlistId) async {
+    final db = await database;
+    await db.delete('playlist_transitions', where: 'playlistId = ?', whereArgs: [playlistId]);
+  }
+
+  Future<void> deleteTransitionsOfSong(String songId) async {
+    final db = await database;
+    await db.delete('playlist_transitions', where: 'fromSongId = ? OR toSongId = ?', whereArgs: [songId, songId]);
   }
 
   Future<void> ignoreRecommendation(IgnoredRecommendation r) async {

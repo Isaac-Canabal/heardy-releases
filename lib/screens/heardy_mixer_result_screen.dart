@@ -7,11 +7,14 @@ import '../l10n/app_localizations.dart';
 import '../models/mix_record.dart';
 import '../providers/heardy_mixer_provider.dart';
 import '../services/audio_player_handler.dart';
+import '../services/mix/mix_types.dart' show MixWarning;
 import '../services/mix/mix_naming.dart';
+import '../services/mix/mixer_labels.dart';
 import '../services/mix/mixer_logic.dart';
 import '../theme/app_theme.dart';
 import '../widgets/desktop_shell_scope.dart';
 import '../widgets/max_width_center.dart';
+import 'heardy_mixer_screen.dart' show MixerStyleCard, MixerWarningsCard;
 
 typedef MixesSectionOpener = void Function(BuildContext context, MixRecord record);
 
@@ -96,6 +99,9 @@ class _HeardyMixerResultScreenState extends State<HeardyMixerResultScreen> {
     final l10n = AppLocalizations.of(context)!;
     context.watch<HeardyMixerProvider>();
     final r = _record;
+    final mixer = context.read<HeardyMixerProvider>();
+    final warnings = mixer.lastRecord?.id == r.id ? mixer.lastWarnings : const <MixWarning>[];
+    final report = mixer.lastRecord?.id == r.id ? mixer.lastReport : null;
     final art = r.artPath.isNotEmpty && File(r.artPath).existsSync() ? File(r.artPath) : null;
     return Scaffold(
       body: Container(
@@ -168,6 +174,24 @@ class _HeardyMixerResultScreenState extends State<HeardyMixerResultScreen> {
                   icon: const Icon(Icons.queue_music_rounded),
                   label: Text(l10n.mixerResultViewMixes),
                 ),
+                if (mixer.lastFromEditor && mixer.lastRecord?.id == r.id)
+                  TextButton.icon(
+                    key: const Key('mixer_result_back_to_editor'),
+                    onPressed: () {
+                      mixer.backToEditing();
+                      Navigator.of(context).maybePop();
+                    },
+                    icon: const Icon(Icons.tune_rounded),
+                    label: Text(l10n.editorBackToEditor),
+                  ),
+                if (report?.selection != null) ...[
+                  const SizedBox(height: 12),
+                  MixerStyleCard(report: report!),
+                ],
+                if (warnings.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  MixerWarningsCard(warnings: warnings, titleA: shortSongTitle(r.titleA), titleB: shortSongTitle(r.titleB)),
+                ],
                 const SizedBox(height: 12),
                 Text(l10n.mixerResultLocalNote,
                     textAlign: TextAlign.center, style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 12)),

@@ -10,7 +10,9 @@ import '../theme/app_theme.dart';
 import '../theme/area_colors.dart';
 import '../screens/now_playing_screen.dart';
 import '../l10n/app_localizations.dart';
+import '../services/overlap_view.dart';
 import 'desktop_shell_scope.dart';
+import 'overlap_cover_stack.dart';
 
 /// Alto de la barra de progreso sobre el cuerpo del mini-reproductor.
 const double _progressHeight = 3;
@@ -189,15 +191,34 @@ class MiniPlayer extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
                   children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: _buildAlbumArt(mediaItem),
+                    OverlapCoverStack(
+                      item: mediaItem,
+                      overlap: audioHandler.overlapView,
+                      size: 44,
+                      coverBuilder: (context, item) => ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: _buildAlbumArt(item),
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: MiniPlayerTrackLabels(
-                        title: mediaItem.title,
-                        artist: mediaItem.artist ?? AppLocalizations.of(context)!.commonUnknownArtist,
+                      child: ValueListenableBuilder<OverlapView?>(
+                        valueListenable: audioHandler.overlapView,
+                        builder: (context, view, _) {
+                          final shown = displayedMediaItem(mediaItem, view);
+                          return AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 300),
+                            layoutBuilder: (current, previous) => Stack(
+                              alignment: Alignment.centerLeft,
+                              children: [...previous, if (current != null) current],
+                            ),
+                            child: MiniPlayerTrackLabels(
+                              key: ValueKey<String>(shown.id),
+                              title: shown.title,
+                              artist: shown.artist ?? AppLocalizations.of(context)!.commonUnknownArtist,
+                            ),
+                          );
+                        },
                       ),
                     ),
                     IconButton(

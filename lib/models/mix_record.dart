@@ -32,6 +32,17 @@ class MixRecord {
   final DateTime createdAt;
   final String? savedSongId;
 
+  /// `MixTemplate.name` del estilo que se usó. `null` en mixes anteriores a
+  /// la v22. Sólo local: no entra en ningún índice de sincronización.
+  final String? styleId;
+
+  /// Cómo se llegó al estilo: [kStyleAutomatic], [kStyleChosen] o [kStyleEdited].
+  final String? styleOrigin;
+
+  static const kStyleAutomatic = 'automatic';
+  static const kStyleChosen = 'chosen';
+  static const kStyleEdited = 'edited';
+
   MixRecord({
     required this.id,
     required this.name,
@@ -50,6 +61,8 @@ class MixRecord {
     required this.artPath,
     required this.createdAt,
     this.savedSongId,
+    this.styleId,
+    this.styleOrigin,
   });
 
   Map<String, dynamic> toMap() => {
@@ -70,6 +83,8 @@ class MixRecord {
         'artPath': artPath,
         'createdAt': createdAt.toUtc().toIso8601String(),
         'savedSongId': savedSongId,
+        'styleId': styleId,
+        'styleOrigin': styleOrigin,
       };
 
   factory MixRecord.fromMap(Map<String, dynamic> m) => MixRecord(
@@ -90,6 +105,8 @@ class MixRecord {
         artPath: m['artPath'] as String? ?? '',
         createdAt: DateTime.parse(m['createdAt'] as String),
         savedSongId: m['savedSongId'] as String?,
+        styleId: m['styleId'] as String?,
+        styleOrigin: m['styleOrigin'] as String?,
       );
 
   Map<String, dynamic> toJson() => toMap();
@@ -114,5 +131,7 @@ class MixRecord {
         artPath: artPath ?? this.artPath,
         createdAt: createdAt,
         savedSongId: savedSongId ?? this.savedSongId,
+        styleId: styleId,
+        styleOrigin: styleOrigin,
       );
 }

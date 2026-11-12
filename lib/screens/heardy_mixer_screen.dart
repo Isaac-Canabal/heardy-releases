@@ -7,7 +7,9 @@ import '../models/song.dart';
 import '../providers/download_provider.dart';
 import '../providers/heardy_mixer_provider.dart';
 import '../services/download_source.dart';
+import '../services/mix/mix_templates.dart' show templateSupportsMode;
 import '../services/mix/mix_types.dart';
+import '../services/mix/mixer_labels.dart';
 import '../services/mix/mixer_logic.dart';
 import '../services/mix/platform/mix_models.dart';
 import '../theme/app_theme.dart';
@@ -15,6 +17,7 @@ import '../widgets/heardy_mixer_pickers.dart';
 import '../widgets/max_width_center.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/playlist_target_sheet.dart';
+import 'heardy_mixer_editor_screen.dart';
 import 'heardy_mixer_result_screen.dart';
 
 String mixerQualityLabel(AppLocalizations l10n, MixQualityMode m) => switch (m) {
@@ -23,11 +26,20 @@ String mixerQualityLabel(AppLocalizations l10n, MixQualityMode m) => switch (m) 
       MixQualityMode.max => l10n.mixerQualityMax,
     };
 
-String mixerModeLabel(AppLocalizations l10n, MixMode m) => switch (m) {
-      MixMode.automatic => l10n.mixerModeAuto,
-      MixMode.vocalsAOverMusicB => l10n.mixerModeVocalsAOverB,
-      MixMode.vocalsBOverMusicA => l10n.mixerModeVocalsBOverA,
-    };
+/// Title of one of the two songs for buttons and sentences, or "la primera /
+/// la segunda canción" while that slot is still empty.
+String mixerSlotTitle(AppLocalizations l10n, HeardyMixerProvider mixer, MixerSlotId id) => shortSongTitle(
+    mixer.slot(id)?.title ?? '',
+    fallback: id == MixerSlotId.a ? l10n.mixerFirstSong : l10n.mixerSecondSong);
+
+String mixerModeLabel(AppLocalizations l10n, MixMode m, {String? titleA, String? titleB}) {
+  final a = titleA ?? l10n.mixerFirstSong, b = titleB ?? l10n.mixerSecondSong;
+  return switch (m) {
+    MixMode.automatic => l10n.mixerModeAuto,
+    MixMode.vocalsAOverMusicB => l10n.mixerModeVocalsAOverB(a, b),
+    MixMode.vocalsBOverMusicA => l10n.mixerModeVocalsBOverA(a, b),
+  };
+}
 
 String mixerStageLabel(AppLocalizations l10n, MixerUiStage s) => switch (s) {
       MixerUiStage.preparing => l10n.mixerStagePreparing,
@@ -49,6 +61,210 @@ String mixerErrorText(AppLocalizations l10n, MixerErrorKind k) => switch (k) {
       MixerErrorKind.cancelled => l10n.mixerErrorCancelled,
       MixerErrorKind.unknown => l10n.mixerErrorUnknown,
     };
+
+String mixerWarningText(AppLocalizations l10n, MixWarning w, {String? titleA, String? titleB}) {
+  final a = titleA ?? l10n.mixerFirstSong, b = titleB ?? l10n.mixerSecondSong;
+  String name(String s) => s == 'a' ? a : b;
+  String other(String s) => s == 'a' ? b : a;
+  return switch (w.kind) {
+    MixWarningKind.durationDifference => l10n.mixerWarnDuration(name(w.song), other(w.song)),
+    MixWarningKind.tempoFar => l10n.mixerWarnTempoFar(w.value.round().toString()),
+    MixWarningKind.forcedStretch => l10n.mixerWarnForcedStretch(w.value.round().toString()),
+    MixWarningKind.pitchLowerAndSlower => l10n.mixerWarnPitchSlower(name(w.song), other(w.song)),
+    MixWarningKind.keyClash => l10n.mixerWarnKeyClash,
+    MixWarningKind.keyUnknown => l10n.mixerWarnKeyUnknown,
+  };
+}
+
+String mixerStyleName(AppLocalizations l10n, MixTemplate t) => switch (t) {
+      MixTemplate.classic => l10n.mixerStyleClassic,
+      MixTemplate.fullVocalOverlay => l10n.mixerStyleFullVocalOverlay,
+      MixTemplate.alternating16 => l10n.mixerStyleAlternating16,
+      MixTemplate.dropBuild => l10n.mixerStyleDropBuild,
+      MixTemplate.breakdown => l10n.mixerStyleBreakdown,
+      MixTemplate.chorusHook => l10n.mixerStyleChorusHook,
+      MixTemplate.quickCuts => l10n.mixerStyleQuickCuts,
+      MixTemplate.slowBurn => l10n.mixerStyleSlowBurn,
+      MixTemplate.bookend => l10n.mixerStyleBookend,
+      MixTemplate.roleSwap => l10n.mixerStyleRoleSwap,
+      MixTemplate.callAndResponse => l10n.mixerStyleCallAndResponse,
+      MixTemplate.instrumentalBed => l10n.mixerStyleInstrumentalBed,
+    };
+
+String mixerStyleDescription(AppLocalizations l10n, MixTemplate t) => switch (t) {
+      MixTemplate.classic => l10n.mixerStyleClassicDesc,
+      MixTemplate.fullVocalOverlay => l10n.mixerStyleFullVocalOverlayDesc,
+      MixTemplate.alternating16 => l10n.mixerStyleAlternating16Desc,
+      MixTemplate.dropBuild => l10n.mixerStyleDropBuildDesc,
+      MixTemplate.breakdown => l10n.mixerStyleBreakdownDesc,
+      MixTemplate.chorusHook => l10n.mixerStyleChorusHookDesc,
+      MixTemplate.quickCuts => l10n.mixerStyleQuickCutsDesc,
+      MixTemplate.slowBurn => l10n.mixerStyleSlowBurnDesc,
+      MixTemplate.bookend => l10n.mixerStyleBookendDesc,
+      MixTemplate.roleSwap => l10n.mixerStyleRoleSwapDesc,
+      MixTemplate.callAndResponse => l10n.mixerStyleCallAndResponseDesc,
+      MixTemplate.instrumentalBed => l10n.mixerStyleInstrumentalBedDesc,
+    };
+
+String mixerReasonText(AppLocalizations l10n, TemplateReason r) => switch (r) {
+      TemplateReason.onlyEligible => l10n.mixerReasonOnlyEligible,
+      TemplateReason.balanced => l10n.mixerReasonBalanced,
+      TemplateReason.otherVocals => l10n.mixerReasonOtherVocals,
+      TemplateReason.baseVocals => l10n.mixerReasonBaseVocals,
+      TemplateReason.bothVocals => l10n.mixerReasonBothVocals,
+      TemplateReason.instrumentalMaterial => l10n.mixerReasonInstrumentalMaterial,
+      TemplateReason.longBase => l10n.mixerReasonLongBase,
+      TemplateReason.shortBase => l10n.mixerReasonShortBase,
+      TemplateReason.introOutro => l10n.mixerReasonIntroOutro,
+      TemplateReason.similarEnergy => l10n.mixerReasonSimilarEnergy,
+      TemplateReason.contrastingEnergy => l10n.mixerReasonContrastingEnergy,
+      TemplateReason.gentleForClash => l10n.mixerReasonGentleForClash,
+    };
+
+/// Estilo con el que se hizo el mix y, en automático, por qué; avisa si el
+/// estilo pedido no encajó. No ocupa sitio si el informe no trae selección.
+class MixerStyleCard extends StatelessWidget {
+  const MixerStyleCard({super.key, required this.report});
+  final MixReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final sel = report.selection;
+    if (sel == null) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
+    final String? note = sel.automatic
+        ? mixerReasonText(l10n, sel.reason)
+        : sel.requested != report.template
+            ? l10n.mixerResultStyleFallback(mixerStyleName(l10n, sel.requested))
+            : null;
+    return Container(
+      key: const Key('mixer_style_used'),
+      decoration: AppTheme.glassCard(),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.auto_awesome_rounded, color: Colors.white70, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(l10n.mixerResultStyleUsed(mixerStyleName(l10n, report.template)),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ]),
+          if (note != null) ...[
+            const SizedBox(height: 6),
+            Text(note, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Selector de estilo: "Automático" o una de las 12 plantillas. Las que el modo
+/// elegido no admite se ven, pero desactivadas y con su motivo.
+class _StylePicker extends StatelessWidget {
+  const _StylePicker({required this.mixer});
+  final HeardyMixerProvider mixer;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final busy = mixer.phase == MixerPhase.running;
+    final current = mixer.template;
+    Widget tile(Key key, {required bool selected, required String name, required String desc, String? disabled, required VoidCallback onTap}) {
+      final off = disabled != null || busy;
+      return ListTile(
+        key: key,
+        dense: true,
+        enabled: !off,
+        onTap: off ? null : onTap,
+        leading: Icon(selected ? Icons.radio_button_checked_rounded : Icons.radio_button_unchecked_rounded,
+            color: off ? Colors.white24 : Colors.white),
+        title: Text(name, style: TextStyle(color: off ? Colors.white38 : Colors.white, fontWeight: FontWeight.w600)),
+        subtitle: Text(disabled ?? desc, style: TextStyle(color: off ? Colors.white30 : Colors.white60, fontSize: 12)),
+      );
+    }
+
+    return Container(
+      decoration: AppTheme.glassCard(),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+          key: const Key('mixer_style_picker'),
+          iconColor: Colors.white,
+          collapsedIconColor: Colors.white70,
+          title: Text(
+            l10n.mixerStyleSelected(current == null ? l10n.mixerStyleAuto : mixerStyleName(l10n, current)),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                l10n.mixerStylePairNote(mixerSlotTitle(l10n, mixer, MixerSlotId.a), mixerSlotTitle(l10n, mixer, MixerSlotId.b)),
+                key: const Key('mixer_style_pair_note'),
+                style: const TextStyle(color: Colors.white60, fontSize: 12),
+              ),
+            ),
+            tile(const Key('mixer_style_auto'),
+                selected: current == null,
+                name: l10n.mixerStyleAuto,
+                desc: l10n.mixerStyleAutoDesc,
+                onTap: () => mixer.template = null),
+            for (final t in MixTemplate.values)
+              tile(Key('mixer_style_${t.name}'),
+                  selected: current == t,
+                  name: mixerStyleName(l10n, t),
+                  desc: mixerStyleDescription(l10n, t),
+                  disabled: templateSupportsMode(t, mixer.mode) ? null : l10n.mixerStyleAutoOnly,
+                  onTap: () => mixer.template = t),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Lista de avisos (antes de empezar o en el resultado); no ocupa sitio sin avisos.
+class MixerWarningsCard extends StatelessWidget {
+  const MixerWarningsCard({super.key, required this.warnings, this.titleA, this.titleB});
+  final List<MixWarning> warnings;
+
+  /// Titles of the two songs, so the sentences name them instead of "A" and "B".
+  final String? titleA, titleB;
+
+  @override
+  Widget build(BuildContext context) {
+    if (warnings.isEmpty) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
+    return Container(
+      key: const Key('mixer_warnings'),
+      decoration: AppTheme.glassCard(),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.info_outline_rounded, color: Colors.white70, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(l10n.mixerWarningsTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+            ),
+          ]),
+          for (final w in warnings) ...[
+            const SizedBox(height: 6),
+            Text(mixerWarningText(l10n, w, titleA: titleA, titleB: titleB), style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          ],
+        ],
+      ),
+    );
+  }
+}
 
 String mixerEstimateText(AppLocalizations l10n, Duration d) {
   final time = d.inSeconds < 60 ? l10n.mixerEstimateUnderMinute : l10n.mixerEstimateMinutes((d.inSeconds / 60).ceil());
@@ -186,14 +402,25 @@ class _HeardyMixerScreenState extends State<HeardyMixerScreen> {
     if (await _confirmRisk(mode) && mounted) _mixer.quality = mode;
   }
 
-  Future<void> _start() async {
-    if (!await _confirmRisk(_mixer.quality) || !mounted) return;
+  /// Aviso de riesgo y descarga del modelo si falta; `true` si ya se puede trabajar.
+  Future<bool> _prepare() async {
+    if (!await _confirmRisk(_mixer.quality) || !mounted) return false;
     if (!_mixer.isModelInstalled(_mixer.quality)) {
       final ok = await _confirmModelDownload();
-      if (!ok || !mounted) return;
-      if (!await _mixer.downloadModel() || !mounted) return;
+      if (!ok || !mounted) return false;
+      if (!await _mixer.downloadModel() || !mounted) return false;
     }
-    await _mixer.start();
+    return true;
+  }
+
+  Future<void> _start() async {
+    if (await _prepare()) await _mixer.start();
+  }
+
+  Future<void> _openEditor({required bool analyze}) async {
+    if (analyze && !await _prepare()) return;
+    if (!mounted) return;
+    await Navigator.of(context).push(HeardyMixerEditorScreen.route(analyze: analyze));
   }
 
   Future<bool> _confirmModelDownload() async {
@@ -247,12 +474,18 @@ class _HeardyMixerScreenState extends State<HeardyMixerScreen> {
               for (final mode in MixMode.values)
                 ChoiceChip(
                   key: Key('mixer_mode_${mode.name}'),
-                  label: Text(mixerModeLabel(l10n, mode)),
+                  label: Text(mixerModeLabel(l10n, mode,
+                      titleA: mixerSlotTitle(l10n, m, MixerSlotId.a), titleB: mixerSlotTitle(l10n, m, MixerSlotId.b))),
                   selected: m.mode == mode,
                   onSelected: m.phase == MixerPhase.running ? null : (_) => m.mode = mode,
                 ),
             ],
           ),
+          const SizedBox(height: 6),
+          Text(l10n.mixerModeHint, style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12)),
+          const SizedBox(height: 16),
+          _SectionTitle(l10n.mixerStyleTitle),
+          _StylePicker(mixer: m),
           const SizedBox(height: 16),
           _SectionTitle(l10n.mixerQualityTitle),
           _QualityPicker(mixer: m, onSelect: _selectQuality),
@@ -260,8 +493,37 @@ class _HeardyMixerScreenState extends State<HeardyMixerScreen> {
           _ModelStatus(mixer: m, onDownload: () async {
             if (await _confirmModelDownload() && mounted) await _mixer.downloadModel();
           }),
+          if (m.phase != MixerPhase.running && m.preflightWarnings.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            MixerWarningsCard(
+              warnings: m.preflightWarnings,
+              titleA: mixerSlotTitle(l10n, m, MixerSlotId.a),
+              titleB: mixerSlotTitle(l10n, m, MixerSlotId.b),
+            ),
+          ],
           const SizedBox(height: 16),
           _RunPanel(mixer: m, onStart: _start, onOpenResult: _openResult),
+          if (m.editorAvailable && m.phase != MixerPhase.running) ...[
+            const SizedBox(height: 8),
+            if (!m.hasAnalysis)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(l10n.mixerAdvancedHint, style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12)),
+              ),
+            if (m.hasAnalysis)
+              OutlinedButton(
+                key: const Key('mixer_advanced_continue'),
+                onPressed: () => _openEditor(analyze: false),
+                child: Text(l10n.mixerAdvancedContinue),
+              )
+            else
+              OutlinedButton.icon(
+                key: const Key('mixer_advanced'),
+                onPressed: m.canAnalyze ? () => _openEditor(analyze: true) : null,
+                icon: const Icon(Icons.tune_rounded, size: 18),
+                label: Text(l10n.mixerAdvancedEdit),
+              ),
+          ],
         ],
       );
     }
@@ -550,6 +812,56 @@ class _ModelStatus extends StatelessWidget {
   }
 }
 
+/// Avance de un trabajo del Mixer (mezcla, análisis o render del editor).
+class MixerProgressPanel extends StatelessWidget {
+  const MixerProgressPanel({super.key, required this.mixer});
+  final HeardyMixerProvider mixer;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final stage = mixer.stage ?? MixerUiStage.preparing;
+    return Container(
+      key: const Key('mixer_progress'),
+      decoration: AppTheme.glassCard(highlighted: true),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final s in MixerUiStage.values)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: Row(children: [
+                Icon(
+                  s.index < stage.index
+                      ? Icons.check_circle_rounded
+                      : s == stage
+                          ? Icons.radio_button_checked_rounded
+                          : Icons.radio_button_unchecked_rounded,
+                  size: 18,
+                  color: s.index <= stage.index ? AppTheme.primaryLight : Colors.white38,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(mixerStageLabel(l10n, s),
+                      style: TextStyle(color: s == stage ? Colors.white : Colors.white60)),
+                ),
+              ]),
+            ),
+          const SizedBox(height: 10),
+          LinearProgressIndicator(value: mixer.fraction),
+          const SizedBox(height: 8),
+          Text(l10n.mixerRunningHint, style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12)),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(key: const Key('mixer_cancel'), onPressed: mixer.cancel, child: Text(l10n.mixerCancel)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _RunPanel extends StatelessWidget {
   const _RunPanel({required this.mixer, required this.onStart, required this.onOpenResult});
   final HeardyMixerProvider mixer;
@@ -560,43 +872,7 @@ class _RunPanel extends StatelessWidget {
     final l10n = AppLocalizations.of(context)!;
     switch (mixer.phase) {
       case MixerPhase.running:
-        final stage = mixer.stage ?? MixerUiStage.preparing;
-        return Container(
-          key: const Key('mixer_progress'),
-          decoration: AppTheme.glassCard(highlighted: true),
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final s in MixerUiStage.values)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: Row(children: [
-                    Icon(
-                      s.index < stage.index
-                          ? Icons.check_circle_rounded
-                          : s == stage
-                              ? Icons.radio_button_checked_rounded
-                              : Icons.radio_button_unchecked_rounded,
-                      size: 18,
-                      color: s.index <= stage.index ? AppTheme.primaryLight : Colors.white38,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(mixerStageLabel(l10n, s),
-                        style: TextStyle(color: s == stage ? Colors.white : Colors.white60)),
-                  ]),
-                ),
-              const SizedBox(height: 10),
-              LinearProgressIndicator(value: mixer.fraction),
-              const SizedBox(height: 8),
-              Text(l10n.mixerRunningHint, style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12)),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(key: const Key('mixer_cancel'), onPressed: mixer.cancel, child: Text(l10n.mixerCancel)),
-              ),
-            ],
-          ),
-        );
+        return MixerProgressPanel(mixer: mixer);
       case MixerPhase.succeeded:
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

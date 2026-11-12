@@ -7,6 +7,7 @@ import '../models/now_playing_layout.dart';
 import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_tray_service.dart';
+import '../services/overlap_view.dart';
 import '../services/open_artist_profile.dart';
 import '../services/stream_queue_logic.dart';
 import '../providers/settings_provider.dart';
@@ -14,6 +15,7 @@ import '../theme/app_theme.dart';
 import '../theme/area_colors.dart';
 import 'add_current_track.dart';
 import 'marquee_title.dart';
+import 'overlap_cover_stack.dart';
 import 'playback_options_sheet.dart';
 import 'desktop_playback_bar.dart' show DesktopVolumeControl;
 
@@ -98,6 +100,41 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
       isMounted: () => mounted,
       setBusy: (busy) => setState(() => _openingArtist = busy),
       pushRoute: widget.onPushContentRoute,
+    );
+  }
+
+  Widget _overlapCover(AudioPlayerHandler audioHandler, MediaItem item, double size) {
+    return OverlapCoverStack(
+      item: item,
+      overlap: audioHandler.overlapView,
+      size: size,
+      coverBuilder: (context, it) => ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: SmartAlbumArt(
+          artPath: _artPathOf(it),
+          artUrl: _artUrlOf(it),
+          title: it.title,
+          size: size,
+        ),
+      ),
+    );
+  }
+
+  /// Title/artist block that follows what is heard during an overlap.
+  Widget _overlapText(
+    AudioPlayerHandler audioHandler,
+    MediaItem real,
+    Widget Function(MediaItem shown) build,
+  ) {
+    return ValueListenableBuilder<OverlapView?>(
+      valueListenable: audioHandler.overlapView,
+      builder: (context, view, _) {
+        final shown = displayedMediaItem(real, view);
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 300),
+          child: KeyedSubtree(key: ValueKey<String>(shown.id), child: build(shown)),
+        );
+      },
     );
   }
 
@@ -189,34 +226,30 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: SmartAlbumArt(
-                                artPath: _artPathOf(item),
-                                artUrl: _artUrlOf(item),
-                                title: item.title,
-                                size: artSize,
-                              ),
-                            ),
+                            child: _overlapCover(audioHandler, item, artSize),
                           ),
                         ),
                         Padding(
                           padding: const EdgeInsets.fromLTRB(24, 18, 24, 0),
-                          child: Column(
-                            crossAxisAlignment: titleAlign.crossAxis,
-                            children: [
-                              MarqueeTitle(
-                                item.title,
-                                textAlign: titleAlign.textAlign,
-                                style: TextStyle(
-                                  color: _titleColor(context),
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                          child: _overlapText(
+                            audioHandler,
+                            item,
+                            (shown) => Column(
+                              crossAxisAlignment: titleAlign.crossAxis,
+                              children: [
+                                MarqueeTitle(
+                                  shown.title,
+                                  textAlign: titleAlign.textAlign,
+                                  style: TextStyle(
+                                    color: _titleColor(context),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              _artistLink(item, 14),
-                            ],
+                                const SizedBox(height: 4),
+                                _artistLink(shown, 14),
+                              ],
+                            ),
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -320,36 +353,37 @@ class _DesktopNowPlayingPanelState extends State<DesktopNowPlayingPanel> {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(16),
                                 ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: SmartAlbumArt(
-                                    artPath: _artPathOf(item),
-                                    artUrl: _artUrlOf(item),
-                                    title: item.title,
-                                    size: artSize,
-                                  ),
-                                ),
+                                child: _overlapCover(audioHandler, item, artSize),
                               ),
                             );
                           },
                         ),
                         const SizedBox(height: 14),
-                        MarqueeTitle(
-                          item.title,
-                          textAlign: titleAlign.textAlign,
-                          style: TextStyle(
-                            color: _titleColor(context),
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        _overlapText(
+                          audioHandler,
+                          item,
+                          (shown) => Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              MarqueeTitle(
+                                shown.title,
+                                textAlign: titleAlign.textAlign,
+                                style: TextStyle(
+                                  color: _titleColor(context),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              // Sin `Align` en el centro para que lo predeterminado
+                              // siga dibujándose como siempre.
+                              if (titleAlign == NowPlayingTitleAlign.center)
+                                _artistLink(shown, 13)
+                              else
+                                Align(alignment: titleAlign.alignment, child: _artistLink(shown, 13)),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        // Sin `Align` en el centro para que lo predeterminado
-                        // siga dibujándose como siempre.
-                        if (titleAlign == NowPlayingTitleAlign.center)
-                          _artistLink(item, 13)
-                        else
-                          Align(alignment: titleAlign.alignment, child: _artistLink(item, 13)),
                         const SizedBox(height: 12),
                         _Controls(audioHandler: audioHandler),
                         const SizedBox(height: 12),

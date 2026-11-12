@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' show Random;
 import 'package:audio_service/audio_service.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -14,6 +15,8 @@ import '../providers/settings_provider.dart';
 import 'database_helper.dart';
 import 'playback_state_service.dart';
 import 'app_log.dart';
+import 'transition_playback.dart';
+import 'overlap_view.dart';
 import 'download_source.dart';
 import 'fade_logic.dart';
 import 'media_controls.dart';
@@ -118,7 +121,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   double get _outputFactor => _fadeFactor;
 
   Future<void> _pushVolume() async {
-    if (_sleepFading) return;
+    if (_sleepFading || _crossfading) return;
     try {
       await _player.setVolume(clampVolume(volume.value * _outputFactor));
     } catch (e) {
@@ -172,6 +175,169 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       _fadeFactor = next;
       _pushVolume();
     });
+  }
+
+  // --- TRANSICIONES DE PLAYLIST: estado de la voz ---
+  // Windows/Android: la voz fantasma que toca el clip de una transición.
+  /// Windows: el reproductor nativo de la voz fantasma acaba de crearse y
+  /// necesita el ecualizador (lo cablea `main.dart`).
+  VoidCallback? onCrossfadeVoiceReady;
+
+  bool get _supportsTransitions => Platform.isAndroid || Platform.isWindows;
+  bool get _crossfading => _transition?.running ?? false;
+
+  void _cancelTransition() {
+    _transition?.cancel();
+  }
+
+  // --- VISTA DE SOLAPE (sólo interfaz) ---
+  // Qué canciones se oyen a la vez y en qué punto del solape, para que la
+  // interfaz anime las carátulas y siga lo que suena. Sólo lee posiciones de
+  // los controladores: no cambia ningún tiempo de reproducción. Es null fuera
+  // de un solape y en cualquier cancelación.
+  final ValueNotifier<OverlapView?> _overlapView = ValueNotifier<OverlapView?>(null);
+  ValueListenable<OverlapView?> get overlapView => _overlapView;
+  ({MediaItem outgoing, MediaItem incoming, TransitionPlayback plan})? _transitionView;
+
+  void _setOverlapView(OverlapView? view) {
+    try {
+      _overlapView.value = view;
+    } catch (_) {}
+  }
+
+  void _onClipPosition(TransitionPlaybackController source) {
+    final position = source.clipPositionSec.value;
+    final view = _transitionView;
+    final overlapStart = view?.plan.overlapStartInClipSec;
+    final overlapSec = view?.plan.overlapSec;
+    if (position == null || view == null || overlapStart == null || overlapSec == null) {
+      _setOverlapView(null);
+      return;
+    }
+    _setOverlapView(overlapViewAt(
+      outgoing: view.outgoing,
+      incoming: view.incoming,
+      positionSec: position,
+      overlapStartSec: overlapStart,
+      overlapSec: overlapSec,
+    ));
+  }
+
+  // --- TRANSICIONES DE PLAYLIST ---
+  // Un clip renderizado sin conexión (canción saliente -> mezcla -> entrante)
+  // suena en la voz fantasma entre dos canciones consecutivas de una playlist
+  // con transiciones activas. `main.dart` inyecta la consulta; el manejador no
+  // conoce el proveedor. Si el clip no está listo a tiempo, el par suena con el
+  // corte normal de la cola: nunca se espera.
+  Future<TransitionPlayback?> Function(String playlistId, String fromId, String toId)? _transitionLookup;
+  Timer? _transitionTimer;
+  TransitionPlaybackController? _transition;
+  final TransitionAutoTrigger _transitionTrigger = TransitionAutoTrigger();
+  String? _planKey;
+  TransitionPlayback? _plan;
+
+  set transitionLookup(Future<TransitionPlayback?> Function(String playlistId, String fromId, String toId)? lookup) {
+    _transitionLookup = lookup;
+    _transitionTimer?.cancel();
+    _transitionTimer = null;
+    _planKey = null;
+    _plan = null;
+    if (lookup == null || !_supportsTransitions) return;
+    _transitionTimer = Timer.periodic(const Duration(milliseconds: 250), (_) => _transitionTick());
+  }
+
+  ({int index, int next, MediaItem outgoing, MediaItem incoming, String playlistId})? _transitionBoundary() {
+    if (_streamTracks != null || _sleepFading || _reorderingQueue || _player.loopMode == LoopMode.one) return null;
+    if (_sleepTracks.isActive && (_sleepTracks.remaining ?? 0) <= 1) return null;
+    final items = queue.value;
+    final index = _player.currentIndex;
+    final next = _player.nextIndex;
+    if (index == null || next == null || next == index) return null;
+    if (index >= items.length || next >= items.length) return null;
+    if (mediaItem.value?.id != items[index].id) return null;
+    if (_isStreamItem(items[index]) || _isStreamItem(items[next])) return null;
+    final playlistId = items[index].extras?['playlist_id'];
+    if (playlistId is! String || playlistId.isEmpty) return null;
+    if (items[next].extras?['playlist_id'] != playlistId) return null;
+    return (index: index, next: next, outgoing: items[index], incoming: items[next], playlistId: playlistId);
+  }
+
+  void _transitionTick() {
+    final lookup = _transitionLookup;
+    if (lookup == null || _crossfading || !_player.playing) return;
+    final b = _transitionBoundary();
+    if (b == null) return;
+    final key = '${b.index}:${b.outgoing.id}>${b.incoming.id}';
+    if (_planKey != key) {
+      _planKey = key;
+      _plan = null;
+      unawaited(_resolvePlan(lookup, key, b.playlistId, b.outgoing.id, b.incoming.id));
+      return;
+    }
+    final plan = _plan;
+    if (plan == null) return;
+    final action = _transitionTrigger.evaluate(
+      key: key,
+      positionSec: _player.position.inMilliseconds / 1000,
+      clipStartSec: plan.clipStartInOutgoingSec,
+    );
+    if (action != TransitionTriggerAction.start) return;
+    unawaited(_runTransition(plan, b.next, b.outgoing, b.incoming));
+  }
+
+  Future<void> _resolvePlan(
+    Future<TransitionPlayback?> Function(String, String, String) lookup,
+    String key,
+    String playlistId,
+    String fromId,
+    String toId,
+  ) async {
+    try {
+      final plan = await lookup(playlistId, fromId, toId);
+      if (_planKey == key && plan != null && plan.isUsable) _plan = plan;
+    } catch (e) {
+      print('Transición: no se pudo preparar el clip (${e.runtimeType})');
+    }
+  }
+
+  Future<TransitionResult> _runTransition(
+    TransitionPlayback plan,
+    int nextIndex,
+    MediaItem outgoing,
+    MediaItem incoming,
+  ) {
+    var controller = _transition;
+    if (controller == null) {
+      final created = TransitionPlaybackController(createVoice: _createClipVoice);
+      created.clipPositionSec.addListener(() => _onClipPosition(created));
+      controller = _transition = created;
+    }
+    _transitionView = (outgoing: outgoing, incoming: incoming, plan: plan);
+    return controller.run(
+      plan: plan,
+      clipSource: AudioSource.uri(_sourceUriFor(plan.clipPath)),
+      mainPosition: () => _player.position,
+      masterVolume: () => clampVolume(volume.value * _outputFactor),
+      setMainVolume: (v) => _player.setVolume(clampVolume(v)),
+      // Índice explícito: si el principal ya avanzó solo, sólo cambia la posición.
+      advanceMain: (position) => _player.seek(position, index: nextIndex),
+      seekMain: _player.seek,
+      restoreMainVolume: () async {
+        if (_sleepFading) return;
+        await _player.setVolume(clampVolume(volume.value * _outputFactor));
+      },
+    );
+  }
+
+  ClipVoice _createClipVoice() => _JustAudioGhostVoice(() => onCrossfadeVoiceReady?.call());
+
+  Future<void> _advanceMainPlayer() async {
+    if (_player.hasNext) {
+      await _player.seekToNext();
+    } else if (_player.loopMode == LoopMode.all && queue.value.isNotEmpty) {
+      // Wrap to first track
+      await _player.seek(Duration.zero, index: 0);
+    }
   }
 
   Future<void> _restoreVolume() async {
@@ -281,6 +447,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     }
 
     _sleepFading = true;
+    _cancelTransition();
     const steps = 30;
     final stepDuration = Duration(
       milliseconds: _sleepFadeDuration.inMilliseconds ~/ steps,
@@ -572,6 +739,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     await _finalizePlay();
     _resetTracking();
     _cancelStreamQueue();
+    _cancelTransition();
     _savedStreamIds = savedVideoIds;
     _streamReady = false;
     _streamErrorReportedFor = null;
@@ -699,6 +867,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
   Future<void> _endStreamQueue() async {
     _cancelStreamQueue();
+    _cancelTransition();
     _streamReady = false;
     try {
       await stop();
@@ -792,6 +961,12 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       );
     });
 
+    // Pausar (a mano, por una interrupción o por el temporizador) apaga la voz
+    // fantasma: no debe quedar sonando sola.
+    _player.playingStream.listen((playing) {
+      if (!playing) _cancelTransition();
+    });
+
     // Synchronize mediaItem updates when active track index changes
     _player.currentIndexStream.listen((index) async {
       // Reordenar la cola (aleatorio de escritorio) mueve el índice de la misma
@@ -842,6 +1017,9 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
         if (duration != null && duration > Duration.zero) {
           _trackingMaxPosition = duration;
         }
+        // La pista saliente terminó antes del traspaso del clip: el clip trae
+        // la cola y el principal avanza por su cuenta al índice siguiente.
+        if (_transition?.running ?? false) return;
         await _finalizePlay();
 
         // LoopMode.one is handled internally by just_audio (it repeats automatically,
@@ -999,6 +1177,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     sleepTracksRemaining.value = null;
     await cancelRepeatCount();
     _cancelStreamQueue();
+    _cancelTransition();
     await _finalizePlay();
     await _player.stop();
     _resetTracking();
@@ -1023,6 +1202,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       // canción no se pierda.
       _trackingMaxPosition = position;
     }
+    _cancelTransition();
     return _player.seek(position);
   }
 
@@ -1044,16 +1224,19 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       if (next != null) _selectStreamTarget(next);
       return;
     }
-    if (_player.hasNext) {
-      await _player.seekToNext();
-    } else if (_player.loopMode == LoopMode.all && queue.value.isNotEmpty) {
-      // Wrap to first track
-      await _player.seek(Duration.zero, index: 0);
+    final transition = _transition;
+    if (transition != null && transition.running) {
+      // Salto durante una transición: se corta el clip y el salto sigue normal.
+      transition.cancel();
+      await _advanceMainPlayer();
+      return;
     }
+    await _advanceMainPlayer();
   }
 
   @override
   Future<void> skipToPrevious() async {
+    _cancelTransition();
     final streamTracks = _streamTracks;
     if (streamTracks != null) {
       final decision = decideStreamPrevious(
@@ -1079,6 +1262,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToQueueItem(int index) async {
+    _cancelTransition();
     if (_streamTracks != null) {
       final target = streamJumpTarget(index, _streamTracks!.length);
       if (target != null) {
@@ -1279,6 +1463,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     if (validItems.isEmpty) return;
     _cancelStreamQueue();
+    _cancelTransition();
 
     final targetIndex = validItems.indexWhere((item) => item.id == targetMediaId);
     final initialIndex = targetIndex != -1 ? targetIndex : 0;
@@ -1367,6 +1552,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     try {
       _cancelStreamQueue();
+      _cancelTransition();
       _streamReady = false;
       _streamErrorReportedFor = null;
       await _finalizePlay();
@@ -1413,6 +1599,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     assert(_isStreamItem(item));
     try {
       _cancelStreamQueue();
+      _cancelTransition();
       _streamReady = false;
       _streamErrorReportedFor = null;
       await _finalizePlay();
@@ -1445,6 +1632,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
 
     if (validItems.isEmpty) return;
     _cancelStreamQueue();
+    _cancelTransition();
 
     final targetIndex = validItems.indexWhere((item) => item.id == targetMediaId);
     final initialIndex = targetIndex != -1 ? targetIndex : 0;
@@ -1694,6 +1882,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     try {
       print('Resetting player state...');
       _cancelStreamQueue();
+      _cancelTransition();
       await _player.stop();
       _playlistSource = null;
       _unshuffledQueue = null;
@@ -1712,6 +1901,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
   Future<void> playUrl(String url, MediaItem item) async {
     try {
       _cancelStreamQueue();
+      _cancelTransition();
       _resetTracking();
       // Resetear el reproductor antes de cargar nueva URL
       await _player.stop();
@@ -1751,6 +1941,7 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
     try {
       print('Iniciando reparación completa...');
       _cancelStreamQueue();
+      _cancelTransition();
 
       // 1. Detener y limpiar el reproductor completamente
       await _player.stop();
@@ -1912,4 +2103,54 @@ class AudioPlayerHandler extends BaseAudioHandler with SeekHandler {
       print('Error inicializando la sesión de audio: $e');
     }
   }
+}
+
+/// Voz fantasma sobre un segundo `AudioPlayer`. Android: otro ExoPlayer (el
+/// ecualizador es global del proceso y lo alcanza); Windows: otra instancia de
+/// mpv, que recibe el ecualizador por [_onNativeReady].
+class _JustAudioGhostVoice implements ClipVoice {
+  _JustAudioGhostVoice(this._onNativeReady);
+
+  final VoidCallback _onNativeReady;
+  AudioPlayer? _player;
+
+  // La voz principal es quien maneja interrupciones y foco de audio.
+  AudioPlayer get _p => _player ??= AudioPlayer(
+        handleInterruptions: false,
+        handleAudioSessionActivation: false,
+      );
+
+  @override
+  Future<void> load(Object source, Duration position) async {
+    final created = _player == null;
+    final player = _p;
+    JustAudioMediaKit.creatingGhost = true;
+    try {
+      await player.setAudioSource(source as AudioSource, initialPosition: position);
+    } finally {
+      JustAudioMediaKit.creatingGhost = false;
+    }
+    if (created) _onNativeReady();
+  }
+
+  @override
+  Future<void> seek(Duration position) => _p.seek(position);
+
+  @override
+  Duration get position => _p.position;
+
+  // `play()` de just_audio no vuelve hasta que la pista termina o se pausa.
+  @override
+  Future<void> play() async {
+    _p.play().catchError((Object _) {});
+  }
+
+  @override
+  Future<void> stop() => _p.pause();
+
+  @override
+  Future<void> setVolume(double volume) => _p.setVolume(volume);
+
+  @override
+  Future<void> dispose() async => _player?.dispose();
 }

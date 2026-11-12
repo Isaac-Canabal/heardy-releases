@@ -207,6 +207,23 @@ Future<bool> _setMpvProperties(Map<String, String> properties) async {
   return true;
 }
 
+/// Como [_setMpvProperties] pero en el reproductor principal y en la voz
+/// fantasma del fundido entre canciones, para que el ecualizador suene igual
+/// en las dos. Devuelve false si no hay ninguno listo.
+Future<bool> _setMpvPropertiesAll(Map<String, String> properties) async {
+  final players = JustAudioMediaKit.rawPlayers;
+  var any = false;
+  for (final player in players) {
+    final platform = player.platform;
+    if (platform is! NativePlayer) continue;
+    any = true;
+    for (final e in properties.entries) {
+      await platform.setProperty(e.key, e.value);
+    }
+  }
+  return any;
+}
+
 /// "Estabilizar audio": en Android un compresor/limitador de sistema
 /// (`DynamicsProcessing`, con `LoudnessEnhancer` de respaldo) enganchado a la
 /// sesión de audio del reproductor; en Windows una ganancia por pista medida
@@ -223,6 +240,7 @@ class AudioEffectsService with ChangeNotifier {
   final VolumeLevelerChannel _leveler;
   final LoudnessAnalyzer _analyzer;
   final MpvPropertySetter _setMpv;
+  final MpvPropertySetter _setMpvAll;
   final List<Duration> _retryDelays;
   final EqualizerChannel _equalizer;
   final Duration _eqThrottle;
@@ -258,6 +276,7 @@ class AudioEffectsService with ChangeNotifier {
         _leveler = leveler ?? MethodVolumeLevelerChannel(),
         _analyzer = analyzer ?? FfmpegLoudnessAnalyzer(),
         _setMpv = setMpvProperties ?? _setMpvProperties,
+        _setMpvAll = setMpvProperties ?? _setMpvPropertiesAll,
         _equalizer = equalizer ?? MethodEqualizerChannel(),
         _eqThrottle = equalizerThrottle,
         _retryDelays = retryDelays ??
@@ -320,6 +339,10 @@ class AudioEffectsService with ChangeNotifier {
     await prefs.setBool(_stabilizeKey, enabled);
     await _apply();
   }
+
+  /// La voz fantasma del fundido acaba de crear su reproductor nativo (Windows)
+  /// y todavía no tiene el filtro `af` del ecualizador.
+  Future<void> reapplyEqualizer() => _applyEqualizer();
 
   Future<void> setEqualizerEnabled(bool enabled) {
     _eqEnabled = enabled;
@@ -398,7 +421,7 @@ class AudioEffectsService with ChangeNotifier {
     final props = buildWindowsEqualizerProperties(enabled: _eqEnabled, gains: _eqGains);
     for (var attempt = 0;; attempt++) {
       if (_disposed || _eqDirty) return;
-      if (await _setMpv(props)) return;
+      if (await _setMpvAll(props)) return;
       if (attempt >= _retryDelays.length) {
         appLog('AudioEffects: el reproductor de escritorio aún no está listo, no se aplicó el ecualizador');
         return;

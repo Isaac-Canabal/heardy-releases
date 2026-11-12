@@ -54,8 +54,14 @@ third-party components. This list is not exhaustive for transitive dependencies.
   as converted to ONNX by sherpa-onnx. Not shipped in the app; downloaded only when the user asks, from the official
   sherpa-onnx release, and verified by SHA-256.
 - **Ultimate Vocal Remover (UVR)** MDX-Net models `UVR_MDXNET_9482` and `UVR-MDX-NET-Voc_FT`
-  (https://github.com/Anjok07/ultimatevocalremovergui), MIT. Credit to UVR and its developers, as their README asks.
-  MDX-Net architecture by Kuielab and Woosung Choi. Downloaded only on request, like Spleeter.
+  (https://github.com/Anjok07/ultimatevocalremovergui). The UVR application code is MIT; the authors have not
+  published a license for the model weights, which were released in the UVR public model repository
+  (https://github.com/TRvlvr/model_repo) and converted to ONNX by sherpa-onnx. Credit to UVR and its developers, who
+  trained them, as their README asks. MDX-Net architecture by Kuielab and Woosung Choi. Not redistributed by
+  Heardy: downloaded only on request, like Spleeter.
+- Methods credited as courtesy (no code copied): Krumhansl-Schmuckler key finding (Carol Krumhansl and Mark
+  Schmuckler) and the Linkwitz-Riley crossover (Siegfried Linkwitz and Russ Riley), both implemented in our own
+  Dart. "Camelot" notation is a name of Mixed In Key, used only to label keys.
 
 ## Dart / Flutter dependencies
 

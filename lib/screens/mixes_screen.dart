@@ -13,6 +13,7 @@ import '../theme/app_theme.dart';
 import '../widgets/desktop_shell_scope.dart';
 import '../widgets/max_width_center.dart';
 import '../widgets/mix_cover_image.dart';
+import '../widgets/mix_details_dialog.dart';
 import '../widgets/playlist_target_sheet.dart';
 import 'heardy_mixer_result_screen.dart';
 import 'heardy_mixer_screen.dart';
@@ -349,6 +350,7 @@ class _MixesScreenState extends State<MixesScreen> {
               onSelected: (action) => switch (action) {
                 'rename' => _rename(entry),
                 'save' => _save(entry),
+                'details' => MixDetailsDialog.show(context, entry.record),
                 _ => _delete(entry),
               },
               itemBuilder: (_) => [
@@ -356,6 +358,8 @@ class _MixesScreenState extends State<MixesScreen> {
                     key: const Key('mixes_action_rename'), value: 'rename', child: Text(l10n.mixesRename)),
                 PopupMenuItem(
                     key: const Key('mixes_action_save'), value: 'save', child: Text(l10n.mixesSaveToPlaylist)),
+                PopupMenuItem(
+                    key: const Key('mixes_action_details'), value: 'details', child: Text(l10n.mixesDetails)),
                 PopupMenuItem(
                     key: const Key('mixes_action_delete'), value: 'delete', child: Text(l10n.mixesDelete)),
               ],

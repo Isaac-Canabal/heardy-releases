@@ -5,6 +5,7 @@
 import 'dart:math' as math;
 
 import 'mix_song.dart';
+import 'mix_templates.dart';
 import 'mix_types.dart';
 
 /// Un tramo de la línea de tiempo: [bars] compases de [song]/[kind] desde
@@ -102,6 +103,86 @@ TempoPlan? planTempo(double baseBpm, double otherBpm, {required double maxStretc
   return TempoPlan(common, sb, so);
 }
 
+/// Como [planTempo] pero nunca falla: si no cabe en [maxShared], las dos van a
+/// la media geométrica acotada a [maxForced] por canción. Si ni así caben (los
+/// tempos se alejan más de (1+m)/(1-m) veces), queda la media geométrica y el
+/// estiramiento pasa del tope; el aviso lo cuenta.
+TempoPlan planTempoForced(double baseBpm, double otherBpm,
+    {required double maxStretch, required double maxShared, required double maxForced}) {
+  final normal = planTempo(baseBpm, otherBpm, maxStretch: maxStretch, maxShared: maxShared);
+  if (normal != null) return normal;
+  var common = math.sqrt(baseBpm * otherBpm);
+  final lo = math.max(baseBpm, otherBpm) * (1 - maxForced);
+  final hi = math.min(baseBpm, otherBpm) * (1 + maxForced);
+  if (lo <= hi) common = common.clamp(lo, hi).toDouble();
+  return TempoPlan(common, common / baseBpm - 1, common / otherBpm - 1);
+}
+
+/// Aviso de duración del par (o `null`): una canción es al menos [ratio] veces
+/// más larga que la otra y la diferencia pasa de [minGapSec]. Sirve también
+/// antes de empezar, con las duraciones de la lista.
+MixWarning? durationWarning(double secondsA, double secondsB, {double ratio = 1.35, double minGapSec = 30}) {
+  final longer = math.max(secondsA, secondsB), shorter = math.min(secondsA, secondsB);
+  if (shorter <= 0 || longer / shorter < ratio || longer - shorter < minGapSec) return null;
+  return MixWarning(MixWarningKind.durationDifference, song: secondsA > secondsB ? 'a' : 'b', value: longer / shorter);
+}
+
+/// Avisos del par, sin audio. [bpmA]/[bpmB] son los del plan (tras plegar).
+/// Para "más grave y más lenta" se compara la raíz de cada tonalidad tal como
+/// sonará (la de la otra ya transpuesta [semitonesOther]) por el camino corto
+/// del círculo de semitonos, y solo si ambas tonalidades son fiables. Con
+/// [semitonesA] o [semitonesB] (plan editado) se usa el tono final de esa
+/// canción, base incluida, en lugar de deducirlo de [semitonesOther].
+List<MixWarning> mixWarnings({
+  required double bpmA,
+  required double bpmB,
+  required double secondsA,
+  required double secondsB,
+  required int rootA,
+  required bool minorA,
+  required double scoreA,
+  required int rootB,
+  required bool minorB,
+  required double scoreB,
+  required bool baseIsA,
+  required int semitonesOther,
+  required TempoPlan tempo,
+  required double maxShared,
+  double minKeyScore = 0.6,
+  double durationRatio = 1.35,
+  double durationMinGapSec = 30,
+  double slowerRatio = 1.03,
+  int? semitonesA,
+  int? semitonesB,
+}) {
+  final out = <MixWarning>[];
+  final dur = durationWarning(secondsA, secondsB, ratio: durationRatio, minGapSec: durationMinGapSec);
+  if (dur != null) out.add(dur);
+  final worst = math.max(tempo.stretchBase.abs(), tempo.stretchOther.abs());
+  if (worst > maxShared + 1e-9) {
+    out.add(MixWarning(MixWarningKind.forcedStretch, value: worst * 100));
+  } else if (tempo.shared) {
+    out.add(MixWarning(MixWarningKind.tempoFar, value: worst * 100));
+  }
+  final trusted = scoreA >= minKeyScore && scoreB >= minKeyScore;
+  if (!trusted) {
+    out.add(const MixWarning(MixWarningKind.keyUnknown));
+    return out;
+  }
+  final soundA = (rootA + (semitonesA ?? (baseIsA ? 0 : semitonesOther))) % 12;
+  final soundB = (rootB + (semitonesB ?? (baseIsA ? semitonesOther : 0))) % 12;
+  if (!keysCompatible(soundA, minorA, soundB, minorB)) {
+    out.add(const MixWarning(MixWarningKind.keyClash));
+  }
+  final d = ((soundA - soundB + 6) % 12 + 12) % 12 - 6;
+  if (d < 0 && bpmA * slowerRatio <= bpmB) {
+    out.add(MixWarning(MixWarningKind.pitchLowerAndSlower, song: 'a'));
+  } else if (d > 0 && bpmB * slowerRatio <= bpmA) {
+    out.add(MixWarning(MixWarningKind.pitchLowerAndSlower, song: 'b'));
+  }
+  return out;
+}
+
 /// Plegado a medio tiempo de cada canción antes de planificar. Por defecto, el
 /// de siempre (un tempo de 100 BPM o más se cuenta a la mitad: compás doble de
 /// 8 pulsos). Si con eso el par no cabe en [maxStretch], se prueba también
@@ -158,7 +239,16 @@ TempoPlan? planTempo(double baseBpm, double otherBpm, {required double maxStretc
 /// Mejor sección de [o] para sustituir a la base: válida, fuerte, con poca voz
 /// (o con voz si [wantVocal]) y sin repetir.
 int oSection(MixSong o, int bars, Set<int> used, {required bool wantVocal, double? targetLufs}) {
-  var best = 8, bestS = -1e9;
+  final best = oSectionOrNull(o, bars, used, wantVocal: wantVocal, targetLufs: targetLufs) ?? 8;
+  used.add(best);
+  return best;
+}
+
+/// Como [oSection] pero devuelve `null` si no hay ninguna sección válida, y no
+/// la marca como usada.
+int? oSectionOrNull(MixSong o, int bars, Set<int> used, {required bool wantVocal, double? targetLufs}) {
+  int? best;
+  var bestS = -1e9;
   final kind = wantVocal ? MixLayer.mix : MixLayer.instrumental;
   for (var b = 4; b + bars <= o.bars - 4; b += 4) {
     if (used.any((u) => (u - b).abs() < bars)) continue;
@@ -179,15 +269,35 @@ int oSection(MixSong o, int bars, Set<int> used, {required bool wantVocal, doubl
       best = b;
     }
   }
-  used.add(best);
   return best;
 }
 
 /// Inicio del outro original de la base, en compases.
 int outroStartOf(int bars) => math.max(snap4(bars - 8), 16);
 
-/// Plan de tramos (sin ordenar) para [base] y [o].
-List<MixSeg> planMix(MixSong base, MixSong o, MixMode mode) {
+/// Plan de tramos (sin ordenar) para [base] y [o] con la plantilla [t]. Si la
+/// plantilla no se puede aplicar al par (o falla), cae en [MixTemplate.classic].
+List<MixSeg> planMixWith(MixTemplate t, MixSong base, MixSong o, MixMode mode) =>
+    planMixResolved(t, base, o, mode).$2;
+
+/// Como [planMixWith] pero dice qué plantilla se usó de verdad.
+(MixTemplate, List<MixSeg>) planMixResolved(MixTemplate t, MixSong base, MixSong o, MixMode mode) {
+  if (t != MixTemplate.classic) {
+    try {
+      final plan = kMixTemplatePlanners[t]?.call(base, o, mode);
+      if (plan != null) return (t, plan);
+    } catch (e) {
+      print('plantilla ${t.name} no aplicable (${e.runtimeType}), se usa classic');
+    }
+  }
+  return (MixTemplate.classic, planClassic(base, o, mode));
+}
+
+/// Plan de siempre: [planMixWith] con classic.
+List<MixSeg> planMix(MixSong base, MixSong o, MixMode mode) => planMixWith(MixTemplate.classic, base, o, mode);
+
+/// Plantilla classic: intro · O (4) · base · voz · O inst (8) · voz · O inst (8) · outro.
+List<MixSeg> planClassic(MixSong base, MixSong o, MixMode mode) {
   final n = base.bars;
   final outroStart = outroStartOf(n);
   final segs = <MixSeg>[];

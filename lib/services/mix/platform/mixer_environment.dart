@@ -25,9 +25,15 @@ class HeardyMixerServices {
     required this.sourceCache,
     required this.platform,
     required this.totalMemoryBytes,
+    this.startAnalyze,
+    this.startEditRender,
   });
   final MixModelManager models;
   final MixJobStarter startJob;
+
+  /// Las dos fases del editor avanzado; `null` desactiva el editor.
+  final MixAnalyzeStarter? startAnalyze;
+  final MixEditRenderStarter? startEditRender;
 
   /// Almacenamiento privado donde quedan los .m4a de los mixes.
   final String mixesDirectory;
@@ -63,6 +69,8 @@ Future<HeardyMixerServices?> createHeardyMixerServices() async {
   return HeardyMixerServices(
     models: models,
     startJob: runner.start,
+    startAnalyze: runner.startAnalyze,
+    startEditRender: runner.startEditRender,
     mixesDirectory: mixes.path,
     sourceCache: MixSourceCache(p.join(temp.path, 'mix_sources')),
     platform: platform,

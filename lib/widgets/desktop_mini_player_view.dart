@@ -7,6 +7,7 @@ import '../screens/now_playing_screen.dart';
 import '../services/audio_player_handler.dart';
 import '../services/desktop_mini_mode_service.dart';
 import '../services/lyrics_service.dart';
+import '../services/overlap_view.dart';
 import '../services/stream_queue_logic.dart';
 
 /// Contenido de la ventana en modo "minimizar y superponer": carátula,
@@ -65,19 +66,30 @@ class _DesktopMiniPlayerViewState extends State<DesktopMiniPlayerView> {
       child: StreamBuilder<MediaItem?>(
         stream: audioHandler.mediaItem,
         builder: (context, snapshot) {
-          final item = snapshot.data;
-          if (item != null) _loadLyricsIfNeeded(item);
+          final real = snapshot.data;
+          if (real != null) _loadLyricsIfNeeded(real);
+
+          // The window follows what is heard: during an overlap the art and
+          // text cross-fade between songs (no card stack in this small window).
+          return ValueListenableBuilder<OverlapView?>(
+            valueListenable: audioHandler.overlapView,
+            builder: (context, view, _) {
+          final item = real == null ? null : displayedMediaItem(real, view);
           final artPath = item?.extras?['artPath'] as String? ?? '';
 
           return Stack(
             fit: StackFit.expand,
             children: [
               if (item != null)
-                SmartAlbumArt(
-                  artPath: artPath,
-                  artUrl: remoteArtUrlFor(artPath, item.artUri),
-                  title: item.title,
-                  size: 180,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 400),
+                  child: SmartAlbumArt(
+                    key: ValueKey<String>(item.id),
+                    artPath: artPath,
+                    artUrl: remoteArtUrlFor(artPath, item.artUri),
+                    title: item.title,
+                    size: 180,
+                  ),
                 )
               else
                 const ColoredBox(color: Colors.black),
@@ -157,6 +169,8 @@ class _DesktopMiniPlayerViewState extends State<DesktopMiniPlayerView> {
                 ),
               ),
             ],
+          );
+            },
           );
         },
       ),

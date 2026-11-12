@@ -10,6 +10,8 @@ import '../services/audio_effects_service.dart';
 import 'equalizer_screen.dart';
 import '../models/now_playing_layout.dart';
 import '../services/audio_player_handler.dart';
+import '../services/overlap_view.dart';
+import '../widgets/overlap_cover_stack.dart';
 import '../services/cover_color.dart';
 import '../services/explore_logic.dart';
 import '../services/playback_speed_logic.dart';
@@ -310,8 +312,9 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     required double artSize,
   }) {
     return switch (block) {
-      NowPlayingBlock.art => _buildArtBlock(mediaItem, artSize),
+      NowPlayingBlock.art => _buildArtBlock(audioHandler, mediaItem, artSize),
       NowPlayingBlock.info => _buildInfoBlock(
+        audioHandler,
         mediaItem,
         settings,
         l10n,
@@ -337,7 +340,11 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     };
   }
 
-  Widget _buildArtBlock(MediaItem mediaItem, double artSize) {
+  Widget _buildArtBlock(
+    AudioPlayerHandler audioHandler,
+    MediaItem mediaItem,
+    double artSize,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 32.0),
       child: Card(
@@ -346,25 +353,38 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(20),
-          child: _buildAlbumArt(mediaItem, artSize),
+        child: OverlapCoverStack(
+          item: mediaItem,
+          overlap: audioHandler.overlapView,
+          size: artSize,
+          coverBuilder: (context, item) => ClipRRect(
+            borderRadius: BorderRadius.circular(20),
+            child: _buildAlbumArt(item, artSize),
+          ),
         ),
       ),
     );
   }
 
   Widget _buildInfoBlock(
-    MediaItem mediaItem,
+    AudioPlayerHandler audioHandler,
+    MediaItem realItem,
     SettingsProvider settings,
     AppLocalizations l10n,
     NowPlayingTitleAlign titleAlign,
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24.0),
-      child: Column(
-        crossAxisAlignment: titleAlign.crossAxis,
-        children: [
+      child: ValueListenableBuilder<OverlapView?>(
+        valueListenable: audioHandler.overlapView,
+        builder: (context, view, _) {
+          final mediaItem = displayedMediaItem(realItem, view);
+          return AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Column(
+              key: ValueKey<String>(mediaItem.id),
+              crossAxisAlignment: titleAlign.crossAxis,
+              children: [
           MarqueeTitle(
             mediaItem.title,
             textAlign: titleAlign.textAlign,
@@ -385,7 +405,10 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
                 ? null
                 : () => _openArtist(mediaItem.artist!),
           ),
-        ],
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -1797,8 +1820,27 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
   final ScrollController _scrollController = ScrollController();
   bool _didInitialScroll = false;
 
+  // Id of the song heard during an overlap (null outside one): the "now
+  // playing" row follows it. Rebuilds only when the displayed song changes.
+  String? _overlapShownId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.audioHandler.overlapView.addListener(_onOverlap);
+  }
+
+  void _onOverlap() {
+    final real = widget.audioHandler.mediaItem.value;
+    final view = widget.audioHandler.overlapView.value;
+    final id = (real == null || view == null) ? null : displayedMediaItem(real, view).id;
+    if (id == _overlapShownId || !mounted) return;
+    setState(() => _overlapShownId = id);
+  }
+
   @override
   void dispose() {
+    widget.audioHandler.overlapView.removeListener(_onOverlap);
     _scrollController.dispose();
     super.dispose();
   }
@@ -1927,7 +1969,7 @@ class _QueueBottomSheetState extends State<QueueBottomSheet> {
               padding: const EdgeInsets.symmetric(vertical: 12),
               itemBuilder: (context, index) {
                 final item = list[index];
-                final isPlaying = currentItem?.id == item.id;
+                final isPlaying = (_overlapShownId ?? currentItem?.id) == item.id;
 
                 return Dismissible(
                   key: ValueKey('dismiss_${item.id}'),

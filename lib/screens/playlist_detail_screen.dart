@@ -11,6 +11,7 @@ import '../widgets/desktop_shell_scope.dart';
 import '../widgets/song_tile.dart';
 import '../widgets/mini_player.dart';
 import '../widgets/playlist_target_sheet.dart';
+import '../widgets/transition_playlist_entry.dart';
 import 'heardy_mixer_screen.dart';
 import 'online_playlist_detail_screen.dart';
 import '../theme/app_theme.dart';
@@ -251,8 +252,13 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
           children: [
             Column(
               children: [
+                if (allSongs.length >= 2)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 92),
+                    child: PlaylistTransitionsEntry(playlistId: playlist.id, playlistName: playlist.name, songs: allSongs),
+                  ),
                 // Sleek premium search field
-                if (allSongs.isNotEmpty) _buildSearchField(),
+                if (allSongs.isNotEmpty) _buildSearchField(topMargin: allSongs.length >= 2 ? 8 : 100),
                 // Playlist songs list
                 Expanded(
               child: allSongs.isEmpty
@@ -439,9 +445,9 @@ class _PlaylistDetailScreenState extends State<PlaylistDetailScreen> {
 
 
 
-  Widget _buildSearchField() {
+  Widget _buildSearchField({double topMargin = 100}) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(kScreenGutter, 100, kScreenGutter, 8),
+      margin: EdgeInsets.fromLTRB(kScreenGutter, topMargin, kScreenGutter, 8),
       decoration: AppTheme.glassCard(),
       child: TextField(
         controller: _searchController,
